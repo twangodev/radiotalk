@@ -1,48 +1,67 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
-from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from .scenario import Scenario
 
-Decoding = Literal["json_schema", "free"]
-
 
 class Turn(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-    speaker: Literal["ATC", "PILOT"]
-    callsign: str = Field(min_length=1, max_length=32)
-    facility: str | None = None
-    text: str = Field(min_length=1, max_length=2000)
-    intent: str = Field(min_length=1, max_length=64)
+    """One utterance parsed from a plaintext transcript line `SPEAKER: text`."""
 
-
-class ModelTranscript(BaseModel):
-    """The JSON shape the LLM is asked to emit. Subset of Transcript.
-
-    The min/max bounds on ``turns`` are *enforced by the SGLang server* when
-    the run uses ``--decoding json_schema`` (the default). Under ``--decoding
-    free`` the schema is only validated post-hoc.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-    turns: list[Turn] = Field(min_length=4, max_length=60)
+    model_config = ConfigDict(frozen=True)
+    speaker: str
+    text: str
 
 
 class Transcript(BaseModel):
     model_config = ConfigDict(frozen=True)
     scenario_id: str
     scenario: Scenario
+    raw_text: str
     turns: list[Turn]
     model: str
     generated_at: datetime
     prompt_version: str
     taxonomy_version: str
-    decoding: Decoding
 
 
-def model_transcript_json_schema() -> dict:
-    """Schema shipped to the LLM via guided_json / response_format."""
-    return ModelTranscript.model_json_schema()
+# Speaker tag: uppercase alnum + `_ - /` (e.g. ATC, KSFO_TWR, UAL1080, D-AIBC, N12345).
+# Anchored to line start; colon terminates the tag.
+_LINE_RE = re.compile(r"^\s*([A-Z0-9][A-Z0-9 _\-/]{0,31}?)\s*:\s*(.+?)\s*$")
+
+
+class TranscriptParseError(ValueError):
+    """Raised when a raw plaintext transcript cannot be parsed into turns."""
+
+
+def parse_turns(raw: str) -> list[Turn]:
+    """Parse `SPEAKER: utterance` lines into Turns. Skips blank/unparseable lines."""
+    turns: list[Turn] = []
+    for line in raw.splitlines():
+        if not line.strip():
+            continue
+        m = _LINE_RE.match(line)
+        if not m:
+            continue
+        turns.append(Turn(speaker=m.group(1).strip(), text=m.group(2).strip()))
+    return turns
+
+
+MIN_TURNS = 4
+
+
+def validate_turns(turns: list[Turn], scenario: Scenario) -> None:
+    """Raise TranscriptParseError if the parsed turns don't meet minimum bar."""
+    if len(turns) < MIN_TURNS:
+        raise TranscriptParseError(
+            f"only {len(turns)} turns parsed (min {MIN_TURNS})"
+        )
+    focal = scenario.aircraft[0].callsign.upper()
+    speakers = {t.speaker.upper() for t in turns}
+    if focal not in speakers:
+        raise TranscriptParseError(
+            f"focal callsign {focal!r} not found among speakers {sorted(speakers)}"
+        )

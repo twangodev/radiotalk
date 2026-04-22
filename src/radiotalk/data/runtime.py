@@ -4,12 +4,9 @@ import hashlib
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Literal
 
 from .prompt import PROMPT_VERSION
 from .scenario import TAXONOMY_VERSION
-
-Decoding = Literal["json_schema", "free"]
 
 
 @dataclass(frozen=True)
@@ -24,7 +21,6 @@ class RuntimeConfig:
     max_tokens: int = 1024
     shard_size: int = 10_000
     seed: int = 42
-    decoding: Decoding = "json_schema"
     weighter_name: str = "tier_v1"
     regions: tuple[str, ...] = ("us",)
     config_name: str = "us"
@@ -42,7 +38,6 @@ class RuntimeConfig:
             "weighter_name": self.weighter_name,
             "regions": sorted(self.regions),
             "config_name": self.config_name,
-            "decoding": self.decoding,
         }
         blob = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:16]

@@ -15,7 +15,14 @@ from .scenario import (
     Weather,
     region_for_icao,
 )
-from .transcript import ModelTranscript, Transcript, Turn
+from .transcript import (
+    MIN_TURNS,
+    Transcript,
+    TranscriptParseError,
+    Turn,
+    parse_turns,
+    validate_turns,
+)
 from .writer import (
     ConfigFingerprintMismatch,
     Manifest,
@@ -28,8 +35,8 @@ __all__ = [
     "ConfigFingerprintMismatch",
     "CustomWeighter",
     "GenStats",
+    "MIN_TURNS",
     "Manifest",
-    "ModelTranscript",
     "PROMPT_VERSION",
     "ParquetShardWriter",
     "RegionConfig",
@@ -39,12 +46,15 @@ __all__ = [
     "TAXONOMY_VERSION",
     "TierWeighter",
     "Transcript",
+    "TranscriptParseError",
     "Turn",
     "UniformWeighter",
     "Weather",
     "build_prompt",
     "load_region_config",
+    "parse_turns",
     "region_config",
     "region_for_icao",
     "run",
+    "validate_turns",
 ]

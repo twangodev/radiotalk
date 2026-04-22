@@ -104,10 +104,6 @@ def generate(
     seed: Annotated[int, typer.Option(help="PRNG seed.")] = 42,
     temperature: Annotated[float, typer.Option()] = 0.9,
     max_tokens: Annotated[int, typer.Option()] = 1024,
-    decoding: Annotated[
-        str,
-        typer.Option(help="json_schema (SGLang structured output) | free"),
-    ] = "json_schema",
     config: Annotated[
         str,
         typer.Option(help=f"Region config (YAML). Available: {regionconfig.available()}"),
@@ -127,9 +123,6 @@ def generate(
     max_retries: Annotated[int, typer.Option()] = 5,
 ) -> None:
     """Generate transcripts against a local OpenAI-compatible server."""
-    if decoding not in ("json_schema", "free"):
-        raise typer.BadParameter(f"unknown decoding: {decoding}")
-
     region_cfg = regionconfig.load(config)
     w = _pick_weighter(weighter, airports_weights, region_cfg)
     region_set = _parse_regions(regions) if regions else frozenset(region_cfg.allowed_regions)
@@ -145,7 +138,6 @@ def generate(
         max_tokens=max_tokens,
         shard_size=shard_size,
         seed=seed,
-        decoding=decoding,  # type: ignore[arg-type]
         weighter_name=weighter_name,
         regions=tuple(sorted(region_set)),
         config_name=config,
@@ -178,7 +170,7 @@ def generate(
 
     console.print(
         f"generating [bold]{remaining:,}[/] transcripts "
-        f"(seed={seed}, model={model}, concurrency={concurrency}, decoding={decoding})"
+        f"(seed={seed}, model={model}, concurrency={concurrency})"
     )
 
     with Progress(

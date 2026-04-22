@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import json
-
 from radiotalk.data.prompt import PROMPT_VERSION, build
 from radiotalk.data.scenario import ScenarioSampler
-from radiotalk.data.transcript import model_transcript_json_schema
 
 
 def test_build_returns_system_then_user():
@@ -13,11 +10,14 @@ def test_build_returns_system_then_user():
     assert [m["role"] for m in msgs] == ["system", "user"]
 
 
-def test_system_contains_output_schema():
+def test_system_specifies_plaintext_contract():
     scenario = next(iter(ScenarioSampler(seed=1).iter(1)))
     sys_msg = build(scenario)[0]["content"]
-    schema_json = json.dumps(model_transcript_json_schema(), separators=(",", ":"))
-    assert schema_json in sys_msg
+    assert "Plaintext" in sys_msg or "plaintext" in sys_msg
+    assert "SPEAKER: utterance" in sys_msg
+    # No JSON schema leaking into the system prompt.
+    assert "json_schema" not in sys_msg.lower()
+    assert "{" not in sys_msg  # no embedded JSON
 
 
 def test_user_briefing_contains_scenario_fields():

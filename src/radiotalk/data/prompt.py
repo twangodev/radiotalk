@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import json
 from typing import TypedDict
 
 from .scenario import Scenario
-from .transcript import model_transcript_json_schema
 
-PROMPT_VERSION = "p1"
+PROMPT_VERSION = "p2"
 
 _WAKE_NAMES = {"L": "light", "M": "medium", "H": "heavy", "J": "super"}
 
@@ -26,7 +24,7 @@ Follow ICAO/FAA phraseology conventions:
 - Controllers begin transmissions with the callsign being addressed.
 - Wake category drives the callsign suffix: H ("heavy") aircraft append "heavy" to the
   callsign in every transmission; J ("super") aircraft append "super"; L and M append
-  nothing. The scenario briefing tells you the wake category for each aircraft — use it.
+  nothing. The scenario briefing tells you the wake category for each aircraft.
 - Use standard phrases: "cleared for takeoff", "line up and wait", "contact",
   "report reaching", "maintain", "expect", "descend via", "say altitude", "traffic in sight",
   etc.
@@ -39,19 +37,17 @@ Follow ICAO/FAA phraseology conventions:
   add realism. For light traffic, you may keep the exchange focal-only. For moderate or
   heavy traffic, weave in 1-3 short transmissions to/from the background aircraft.
 - Use ONLY the callsigns provided in the briefing. Do not invent additional aircraft.
-- Produce AT LEAST 4 turns and at most 60. Routine exchanges should be 4-8 turns;
-  abnormals 6-15; emergencies 12-30. The schema enforces a hard minimum of 4.
+- Produce AT LEAST 4 turns. Routine exchanges should be 4-8 turns; abnormals 6-15;
+  emergencies 12-30.
 
-OUTPUT CONTRACT: Respond with a single JSON object and nothing else. The object MUST match
-this JSON schema exactly:
+OUTPUT FORMAT: Plaintext only. One turn per line, in the form
 
-{schema}
+SPEAKER: utterance
 
-Every turn must have speaker, callsign, facility (null for PILOT), text, intent. Intents
-are short snake_case tags such as: takeoff_clearance, landing_clearance, readback,
-taxi_instruction, handoff, frequency_change, squawk_assignment, altitude_change,
-heading_vector, traffic_advisory, wx_advisory, pirep, emergency_declaration,
-intent_statement, acknowledgement, go_around_instruction, missed_approach.
+where SPEAKER is either `ATC` (or a specific facility tag such as `KSFO_TWR`,
+`KSFO_GND`, `NORCAL_APP`, `KSFO_RAMP` when useful) or the aircraft callsign exactly
+as given in the briefing. Do not emit JSON, markdown, code fences, headings, or
+commentary — just the lines. The focal aircraft's callsign MUST appear as a speaker.
 """
 
 
@@ -96,13 +92,12 @@ def _render_scenario_briefing(scenario: Scenario) -> str:
 
 
 def build(scenario: Scenario) -> list[ChatMessage]:
-    schema = json.dumps(model_transcript_json_schema(), separators=(",", ":"))
-    system = _SYSTEM_TEMPLATE.format(schema=schema)
     user = (
-        "Generate an ATC exchange for this scenario. Respond with JSON only.\n\n"
+        "Generate an ATC exchange for this scenario. Plaintext only, one "
+        "`SPEAKER: utterance` per line.\n\n"
         f"{_render_scenario_briefing(scenario)}"
     )
     return [
-        {"role": "system", "content": system},
+        {"role": "system", "content": _SYSTEM_TEMPLATE},
         {"role": "user", "content": user},
     ]

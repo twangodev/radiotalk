@@ -16,23 +16,19 @@ from radiotalk.data.writer import (
 
 
 def _make_transcript(scenario, i: int) -> Transcript:
+    raw = f"ATC: turn {i}\n{scenario.aircraft[0].callsign}: readback {i}"
     return Transcript(
         scenario_id=scenario.scenario_id,
         scenario=scenario,
+        raw_text=raw,
         turns=[
-            Turn(
-                speaker="ATC",
-                callsign="KSFO_TWR",
-                facility="KSFO_TWR",
-                text=f"turn {i}",
-                intent="ack",
-            )
+            Turn(speaker="ATC", text=f"turn {i}"),
+            Turn(speaker=scenario.aircraft[0].callsign, text=f"readback {i}"),
         ],
         model="test-model",
         generated_at=datetime.now(timezone.utc),
-        prompt_version="p1",
+        prompt_version="p2",
         taxonomy_version="t1",
-        decoding="json_schema",
     )
 
 

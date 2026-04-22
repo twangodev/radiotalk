@@ -1,17 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import AsyncIterator, Awaitable, Callable, Iterable
+from typing import AsyncIterator, Callable, Iterable
 
 from openai import AsyncOpenAI
 from openai import APIStatusError, RateLimitError, APIConnectionError
 from tenacity import (
     AsyncRetrying,
-    RetryError,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
@@ -20,11 +18,7 @@ from tenacity import (
 from .runtime import RuntimeConfig
 from .prompt import build as build_prompt
 from .scenario import Scenario
-from .transcript import (
-    ModelTranscript,
-    Transcript,
-    model_transcript_json_schema,
-)
+from .transcript import Transcript, parse_turns, validate_turns
 from .writer import ParquetShardWriter
 
 log = logging.getLogger("radiotalk.generator")
@@ -44,24 +38,16 @@ class _HttpError(Exception):
 
 
 def _request_kwargs(cfg: RuntimeConfig) -> dict:
-    """Build chat-completion kwargs for an SGLang OpenAI-compatible endpoint."""
-    kwargs: dict = {
+    """Build chat-completion kwargs for an OpenAI-compatible endpoint.
+
+    Plaintext output — no response_format, no grammar backend. The model is
+    prompted to emit `SPEAKER: utterance` lines and we parse them post-hoc.
+    """
+    return {
         "model": cfg.model,
         "temperature": cfg.temperature,
         "max_tokens": cfg.max_tokens,
     }
-    if cfg.decoding == "json_schema":
-        # SGLang structured outputs (OpenAI spec). The engine enforces the
-        # schema during decoding, including min_length on `turns`.
-        kwargs["response_format"] = {
-            "type": "json_schema",
-            "json_schema": {
-                "name": "ModelTranscript",
-                "schema": model_transcript_json_schema(),
-            },
-        }
-    # "free" adds nothing — no constraints, validated post-hoc.
-    return kwargs
 
 
 async def _one_call(
@@ -94,26 +80,22 @@ async def _call_with_retries(
     raise RuntimeError("unreachable")  # pragma: no cover
 
 
-def _parse(content: str) -> ModelTranscript:
-    data = json.loads(content)
-    return ModelTranscript.model_validate(data)
-
-
 async def _generate_one(
     client: AsyncOpenAI, cfg: RuntimeConfig, scenario: Scenario
 ) -> Transcript:
     messages = build_prompt(scenario)
-    content = await _call_with_retries(client, cfg, messages)
-    parsed = _parse(content)
+    raw = await _call_with_retries(client, cfg, messages)
+    turns = parse_turns(raw)
+    validate_turns(turns, scenario)
     return Transcript(
         scenario_id=scenario.scenario_id,
         scenario=scenario,
-        turns=parsed.turns,
+        raw_text=raw,
+        turns=turns,
         model=cfg.model,
         generated_at=datetime.now(timezone.utc),
         prompt_version=cfg.prompt_version,
         taxonomy_version=cfg.taxonomy_version,
-        decoding=cfg.decoding,
     )
 
 
