@@ -16,7 +16,7 @@ class RuntimeConfig:
     model: str
     count: int
     out_dir: Path
-    concurrency: int = 32
+    concurrency: int = 96
     temperature: float = 0.9
     max_tokens: int = 1024
     shard_size: int = 10_000
