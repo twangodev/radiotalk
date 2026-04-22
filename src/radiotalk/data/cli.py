@@ -103,7 +103,7 @@ def generate(
     shard_size: Annotated[int, typer.Option(help="Rows per Parquet shard.")] = 10_000,
     seed: Annotated[int, typer.Option(help="PRNG seed.")] = 42,
     temperature: Annotated[float, typer.Option()] = 0.9,
-    max_tokens: Annotated[int, typer.Option()] = 1024,
+    max_tokens: Annotated[int, typer.Option()] = 2048,
     config: Annotated[
         str,
         typer.Option(help=f"Region config (YAML). Available: {regionconfig.available()}"),
