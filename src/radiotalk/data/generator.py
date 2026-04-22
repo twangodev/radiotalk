@@ -18,7 +18,7 @@ from tenacity import (
 from .runtime import RuntimeConfig
 from .prompt import build as build_prompt
 from .scenario import Scenario
-from .transcript import Transcript, parse_turns, validate_turns
+from .transcript import Transcript, TranscriptParseError, parse_turns, validate_turns
 from .writer import ParquetShardWriter
 
 log = logging.getLogger("radiotalk.generator")
@@ -42,11 +42,14 @@ def _request_kwargs(cfg: RuntimeConfig) -> dict:
 
     Plaintext output — no response_format, no grammar backend. The model is
     prompted to emit `SPEAKER: utterance` lines and we parse them post-hoc.
+    Qwen3's reasoning mode is disabled: the dataset wants the transcript, not
+    the CoT, and disabling it ~5xs throughput.
     """
     return {
         "model": cfg.model,
         "temperature": cfg.temperature,
         "max_tokens": cfg.max_tokens,
+        "extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
     }
 
 
@@ -84,19 +87,26 @@ async def _generate_one(
     client: AsyncOpenAI, cfg: RuntimeConfig, scenario: Scenario
 ) -> Transcript:
     messages = build_prompt(scenario)
-    raw = await _call_with_retries(client, cfg, messages)
-    turns = parse_turns(raw)
-    validate_turns(turns, scenario)
-    return Transcript(
-        scenario_id=scenario.scenario_id,
-        scenario=scenario,
-        raw_text=raw,
-        turns=turns,
-        model=cfg.model,
-        generated_at=datetime.now(timezone.utc),
-        prompt_version=cfg.prompt_version,
-        taxonomy_version=cfg.taxonomy_version,
-    )
+    last_err: TranscriptParseError | None = None
+    for _ in range(max(1, cfg.max_parse_retries)):
+        raw = await _call_with_retries(client, cfg, messages)
+        try:
+            turns = parse_turns(raw)
+            validate_turns(turns, scenario)
+        except TranscriptParseError as e:
+            last_err = e
+            continue
+        return Transcript(
+            scenario_id=scenario.scenario_id,
+            scenario=scenario,
+            turns=turns,
+            model=cfg.model,
+            generated_at=datetime.now(timezone.utc),
+            prompt_version=cfg.prompt_version,
+            taxonomy_version=cfg.taxonomy_version,
+        )
+    assert last_err is not None
+    raise last_err
 
 
 async def run(

@@ -27,6 +27,7 @@ class RuntimeConfig:
     prompt_version: str = PROMPT_VERSION
     taxonomy_version: str = TAXONOMY_VERSION
     max_retries: int = 5
+    max_parse_retries: int = 5
 
     def fingerprint(self) -> str:
         """Hash of fields that must match for a resume to be valid."""

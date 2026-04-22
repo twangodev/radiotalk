@@ -1,0 +1,56 @@
+services:
+  sglang:
+    image: lmsysorg/sglang:latest
+    container_name: sglang-qwen3
+    restart: unless-stopped
+    ipc: host
+    shm_size: "32gb"
+    ports:
+      - "30000:30000"
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+      HF_HUB_ENABLE_HF_TRANSFER: "1"
+      # SM120 (RTX PRO 6000 Blackwell) stability: DeepGemm asserts on sm_120
+      # scale formats; force flashinfer JIT to target sm_120f.
+      SGLANG_ENABLE_DEEP_GEMM: "0"
+      SGLANG_ENABLE_JIT_DEEPGEMM: "0"
+      FLASHINFER_CUDA_ARCH_LIST: "12.0f"
+    volumes:
+      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+      - ${HOME}/.cache/flashinfer:/root/.cache/flashinfer
+    command:
+      - bash
+      - -c
+      - |
+        set -e
+        echo "[prewarm] building flashinfer FP4 sm_120 modules outside dynamo trace"
+        python <<'PY' || echo "[prewarm] non-fatal warm failure, continuing"
+        from flashinfer.quantization.fp4_quantization import get_fp4_quantization_module
+        for tag in ("120", "120f"):
+            try:
+                get_fp4_quantization_module(tag).build_and_load()
+                print(f"[prewarm] {tag} ok", flush=True)
+            except Exception as e:
+                print(f"[prewarm] {tag} failed: {e}", flush=True)
+        PY
+        exec python3 -m sglang.launch_server \
+          --model-path nvidia/Qwen3-32B-NVFP4 \
+          --quantization modelopt_fp4 \
+          --fp4-gemm-backend flashinfer_cudnn \
+          --kv-cache-dtype bf16 \
+          --disable-piecewise-cuda-graph \
+          --host 0.0.0.0 \
+          --port 30000
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:30000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 600s

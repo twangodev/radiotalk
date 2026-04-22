@@ -99,7 +99,7 @@ def generate(
         str, typer.Option(help="API key (local servers usually accept anything).")
     ] = "",
     model: Annotated[str, typer.Option(help="Model name.")] = "Qwen/Qwen3-32B-NVFP4",
-    concurrency: Annotated[int, typer.Option(help="Concurrent in-flight requests.")] = 32,
+    concurrency: Annotated[int, typer.Option(help="Concurrent in-flight requests.")] = 64,
     shard_size: Annotated[int, typer.Option(help="Rows per Parquet shard.")] = 10_000,
     seed: Annotated[int, typer.Option(help="PRNG seed.")] = 42,
     temperature: Annotated[float, typer.Option()] = 0.9,
@@ -121,6 +121,10 @@ def generate(
     resume: Annotated[bool, typer.Option("--resume/--no-resume")] = True,
     overwrite: Annotated[bool, typer.Option("--overwrite")] = False,
     max_retries: Annotated[int, typer.Option()] = 5,
+    max_parse_retries: Annotated[
+        int,
+        typer.Option(help="Re-sample attempts when output fails parse/validation."),
+    ] = 5,
 ) -> None:
     """Generate transcripts against a local OpenAI-compatible server."""
     region_cfg = regionconfig.load(config)
@@ -142,6 +146,7 @@ def generate(
         regions=tuple(sorted(region_set)),
         config_name=config,
         max_retries=max_retries,
+        max_parse_retries=max_parse_retries,
     )
 
     writer = ParquetShardWriter.open(

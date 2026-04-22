@@ -20,7 +20,6 @@ class Transcript(BaseModel):
     model_config = ConfigDict(frozen=True)
     scenario_id: str
     scenario: Scenario
-    raw_text: str
     turns: list[Turn]
     model: str
     generated_at: datetime

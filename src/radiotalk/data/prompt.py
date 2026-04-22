@@ -4,7 +4,7 @@ from typing import TypedDict
 
 from .scenario import Scenario
 
-PROMPT_VERSION = "p2"
+PROMPT_VERSION = "p1"
 
 _WAKE_NAMES = {"L": "light", "M": "medium", "H": "heavy", "J": "super"}
 
@@ -39,6 +39,17 @@ Follow ICAO/FAA phraseology conventions:
 - Use ONLY the callsigns provided in the briefing. Do not invent additional aircraft.
 - Produce AT LEAST 4 turns. Routine exchanges should be 4-8 turns; abnormals 6-15;
   emergencies 12-30.
+- Run the exchange to a natural close. Either:
+    (a) end with a frequency handoff appropriate to the phase (e.g. ground -> tower:
+        "Contact tower one one eight point three"; tower -> departure: "Contact
+        departure one two five point seven"; approach -> tower: "Contact tower one
+        one niner point one"), immediately followed by the focal aircraft's readback
+        of the new frequency and callsign; OR
+    (b) end at a logical stopping point where no further transmission is expected on
+        this frequency (e.g. final readback of a clearance with no follow-up due,
+        "good day" sign-off after a handoff, or a cleared-to-land readback at the end
+        of the approach segment).
+  Do not cut off mid-clearance or mid-readback.
 
 OUTPUT FORMAT: Plaintext only. One turn per line, in the form
 
