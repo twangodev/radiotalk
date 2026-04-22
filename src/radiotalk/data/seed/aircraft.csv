@@ -1,0 +1,84 @@
+icao_type,manufacturer,model,wake,operator_classes
+B737,Boeing,737-800,M,commercial
+B738,Boeing,737-800,M,commercial
+B739,Boeing,737-900,M,commercial
+B38M,Boeing,737 MAX 8,M,commercial
+B39M,Boeing,737 MAX 9,M,commercial
+B752,Boeing,757-200,M,commercial
+B763,Boeing,767-300,H,commercial
+B772,Boeing,777-200,H,commercial
+B77W,Boeing,777-300ER,H,commercial
+B788,Boeing,787-8,H,commercial
+B789,Boeing,787-9,H,commercial
+B78X,Boeing,787-10,H,commercial
+B744,Boeing,747-400,H,commercial
+B748,Boeing,747-8,H,commercial
+A319,Airbus,A319,M,commercial
+A320,Airbus,A320,M,commercial
+A321,Airbus,A321,M,commercial
+A20N,Airbus,A320neo,M,commercial
+A21N,Airbus,A321neo,M,commercial
+A332,Airbus,A330-200,H,commercial
+A333,Airbus,A330-300,H,commercial
+A339,Airbus,A330-900,H,commercial
+A343,Airbus,A340-300,H,commercial
+A346,Airbus,A340-600,H,commercial
+A359,Airbus,A350-900,H,commercial
+A35K,Airbus,A350-1000,H,commercial
+A388,Airbus,A380-800,J,commercial
+E170,Embraer,E170,M,commercial
+E175,Embraer,E175,M,commercial
+E190,Embraer,E190,M,commercial
+E195,Embraer,E195,M,commercial
+E75L,Embraer,E175-LR,M,commercial
+CRJ2,Bombardier,CRJ-200,M,commercial
+CRJ7,Bombardier,CRJ-700,M,commercial
+CRJ9,Bombardier,CRJ-900,M,commercial
+DH8D,Bombardier,Dash 8-Q400,M,commercial
+AT72,ATR,ATR 72,M,commercial
+MD82,McDonnell Douglas,MD-82,M,commercial
+BCS3,Airbus,A220-300,M,commercial
+BCS1,Airbus,A220-100,M,commercial
+B76F,Boeing,767-300F,H,cargo
+B77F,Boeing,777F,H,cargo
+B74F,Boeing,747-400F,H,cargo
+MD11,McDonnell Douglas,MD-11F,H,cargo
+A33F,Airbus,A330-200F,H,cargo
+A30B,Airbus,A300-600F,H,cargo
+C208,Cessna,208 Caravan,L,ga|cargo
+C172,Cessna,172 Skyhawk,L,ga|training
+C182,Cessna,182 Skylane,L,ga|training
+PA28,Piper,Cherokee PA-28,L,ga|training
+PA46,Piper,Malibu PA-46,L,ga
+BE36,Beechcraft,Bonanza A36,L,ga
+SR22,Cirrus,SR22,L,ga|training
+DA40,Diamond,DA40,L,ga|training
+DA42,Diamond,DA42,L,ga|training
+BE58,Beechcraft,Baron 58,L,ga|training
+C25A,Cessna,CitationJet CJ2,L,business
+C56X,Cessna,Citation Excel,L,business
+C68A,Cessna,Citation Latitude,M,business
+GLF5,Gulfstream,G550,M,business
+GLF6,Gulfstream,G650,M,business
+GLEX,Bombardier,Global Express,M,business
+CL60,Bombardier,Challenger 600,M,business
+F2TH,Dassault,Falcon 2000,M,business
+PC12,Pilatus,PC-12,L,business|medevac
+BE20,Beechcraft,King Air 200,L,business|medevac
+BE30,Beechcraft,King Air 350,L,business|medevac
+R22,Robinson,R22,L,ga|training|rotorcraft
+R44,Robinson,R44,L,ga|rotorcraft
+EC35,Airbus,H135,L,rotorcraft|medevac
+BK17,Kawasaki,BK117,L,rotorcraft|medevac
+AS50,Airbus,AS350,L,rotorcraft|medevac
+C30J,Lockheed,C-130J Hercules,H,military
+C17,Boeing,C-17 Globemaster III,H,military
+K35R,Boeing,KC-135R Stratotanker,H,military
+E3CF,Boeing,E-3 Sentry,H,military
+P8,Boeing,P-8 Poseidon,H,military
+F16,Lockheed,F-16 Fighting Falcon,M,military
+F18,Boeing,F/A-18 Hornet,M,military
+F35,Lockheed,F-35 Lightning II,M,military
+H60,Sikorsky,UH-60 Black Hawk,M,military|rotorcraft
+H47,Boeing,CH-47 Chinook,M,military|rotorcraft
+V22,Boeing,V-22 Osprey,M,military

@@ -1,0 +1,235 @@
+# US region config — defaults for `radiotalk data generate --config us`.
+# Every knob the ScenarioSampler reads at runtime lives here. Edit this file
+# (or copy it to a new region YAML) to retune distributions without touching code.
+
+name: us
+allowed_regions: [us]
+
+# ────────────────────────────────────────────────────────────────────────────
+# Airport weighting
+# ────────────────────────────────────────────────────────────────────────────
+# TierWeighter assigns weights to airports based on their tier below.
+# Anything not listed in `airport_tiers` gets `tier_weights.default`.
+tier_weights:
+  "1": 50.0      # major hubs
+  "2": 10.0      # regionals
+  default: 1.0   # everything else (small towered + uncontrolled fields)
+
+airport_tiers:
+  # ─── Tier 1 — major US hubs ───
+  KATL: 1
+  KLAX: 1
+  KORD: 1
+  KDFW: 1
+  KDEN: 1
+  KJFK: 1
+  KSFO: 1
+  KSEA: 1
+  KLAS: 1
+  KMCO: 1
+  KCLT: 1
+  KEWR: 1
+  KPHX: 1
+  KMIA: 1
+  KIAH: 1
+  KBOS: 1
+  KMSP: 1
+  KFLL: 1
+  KDTW: 1
+  KPHL: 1
+  KLGA: 1
+  KBWI: 1
+  KSLC: 1
+  KIAD: 1
+  KDCA: 1
+  KSAN: 1
+  KTPA: 1
+  KPDX: 1
+  PHNL: 1
+  KSTL: 1
+  KMDW: 1
+  KAUS: 1
+  KBNA: 1
+  KMSY: 1
+  KRDU: 1
+  # ─── Tier 2 — US regionals ───
+  KCLE: 2
+  KCVG: 2
+  KCMH: 2
+  KIND: 2
+  KMKE: 2
+  KPIT: 2
+  KRIC: 2
+  KBUF: 2
+  KROC: 2
+  KSYR: 2
+  KALB: 2
+  KBDL: 2
+  KPVD: 2
+  KMHT: 2
+  KPWM: 2
+  KABQ: 2
+  KELP: 2
+  KTUS: 2
+  KOKC: 2
+  KTUL: 2
+  KMEM: 2
+  KBHM: 2
+  KJAX: 2
+  KPBI: 2
+  KRSW: 2
+  KSAV: 2
+  KCHS: 2
+  KGSP: 2
+  KMYR: 2
+  KSDF: 2
+  KLEX: 2
+  KHSV: 2
+  KMCI: 2
+  KOMA: 2
+  KSHV: 2
+  KLBB: 2
+  KAMA: 2
+  KCOS: 2
+  KBIL: 2
+  KBOI: 2
+  KSMF: 2
+  KFAT: 2
+  KRNO: 2
+  KSBA: 2
+  KSNA: 2
+  KBUR: 2
+  KLGB: 2
+  KOAK: 2
+  KSJC: 2
+  PANC: 2
+  PAFA: 2
+
+# ────────────────────────────────────────────────────────────────────────────
+# Operator class distribution
+# ────────────────────────────────────────────────────────────────────────────
+operator_weights:
+  commercial: 45.0
+  cargo: 7.0
+  ga: 25.0
+  business: 5.0
+  military: 8.0
+  training: 7.0
+  rotorcraft: 2.0
+  medevac: 1.0
+
+# Callsign prefixes per operator class. ga/training/rotorcraft use US N-numbers.
+operator_prefixes:
+  commercial: [AAL, DAL, UAL, SWA, JBU, ASA, NKS, FFT, SKW,
+               BAW, DLH, AFR, KLM, ELY, UAE, QTR, SIA, ANA,
+               JAL, QFA, ACA, LAN, IBE, SAS, FIN, VIR]
+  cargo: [FDX, UPS, GTI, ABX, CLX, CKS, ABW]
+  business: [EJA, XOJ, NJA, FLX]
+  medevac: [LIFEGUARD, MED, LFG]
+  military: [REACH, CNV, ARMY, NAVY, SHELL, PAT]
+  ga: []
+  training: []
+  rotorcraft: []
+
+# ────────────────────────────────────────────────────────────────────────────
+# Event distribution: ~80% routine, ~15% abnormals, ~5% emergencies, ~1% rare
+# ────────────────────────────────────────────────────────────────────────────
+event_weights:
+  routine: 80.0
+  go_around: 2.0
+  missed_approach: 1.5
+  runway_change: 1.5
+  hold: 1.5
+  traffic_advisory: 3.0
+  weather_deviation: 2.0
+  pirep: 1.5
+  equipment_issue: 1.0
+  navigation_issue: 1.0
+  emergency_medical: 1.2
+  emergency_mechanical: 0.9
+  emergency_fuel: 0.5
+  emergency_bird_strike: 0.4
+  emergency_fire: 0.4
+  emergency_pressurization: 0.3
+  emergency_hydraulic: 0.3
+  emergency_electrical: 0.3
+  emergency_flight_control: 0.3
+  nordo: 0.3
+  minimum_fuel_advisory: 0.4
+  diversion: 0.3
+  priority_handling: 0.3
+
+# ────────────────────────────────────────────────────────────────────────────
+# Traffic + roster
+# ────────────────────────────────────────────────────────────────────────────
+traffic_density_weights:
+  light: 30
+  moderate: 50
+  heavy: 20
+
+# Number of aircraft on the frequency, by traffic density.
+traffic_aircraft_range:
+  light: [1, 2]
+  moderate: [2, 4]
+  heavy: [5, 8]
+
+# ────────────────────────────────────────────────────────────────────────────
+# Phase + frequency bands
+# ────────────────────────────────────────────────────────────────────────────
+phase_weights:
+  ground: 1
+  tower: 1
+  approach: 1
+  center: 1
+  ramp: 1
+
+# VHF aircraft band assignments per phase (MHz).
+phase_frequency_bands:
+  ground: [121.6, 121.9]
+  tower: [118.0, 120.9]
+  approach: [119.0, 127.9]
+  center: [128.0, 135.9]
+  ramp: [129.0, 131.9]
+
+# ────────────────────────────────────────────────────────────────────────────
+# Time of day
+# ────────────────────────────────────────────────────────────────────────────
+time_of_day_weights:
+  day: 55
+  night: 25
+  dawn: 10
+  dusk: 10
+
+# ────────────────────────────────────────────────────────────────────────────
+# Runway + procedure naming
+# ────────────────────────────────────────────────────────────────────────────
+# Runway heading is uniform 1..36; this picks the side suffix.
+runway_suffix_weights:
+  "": 60
+  L: 15
+  R: 15
+  C: 10
+
+# Probability the focal aircraft has no SID/STAR in approach/tower/center phases.
+# (ground/ramp phases are always None regardless of this value.)
+sid_star_none_chance: 0.35
+
+# ────────────────────────────────────────────────────────────────────────────
+# Weather
+# ────────────────────────────────────────────────────────────────────────────
+weather:
+  vmc_imc_weights:
+    VMC: 75
+    IMC: 25
+  vmc_vis_sm: [5.0, 10.0]
+  imc_vis_sm: [0.25, 3.0]
+  vmc_ceiling_chance: 0.4         # P(ceiling != null | VMC)
+  vmc_ceiling_ft: [5000, 20000]
+  imc_ceiling_ft: [100, 2000]
+  altimeter_inhg: [29.50, 30.40]
+  wind_dir_deg: [0, 360]
+  # Tri-bucket wind sampler — pick a bucket then uniform within range.
+  wind_kt_buckets:
+    - {range: [0, 10], weight: 60}
+    - {range: [10, 25], weight: 30}
+    - {range: [25, 45], weight: 10}
