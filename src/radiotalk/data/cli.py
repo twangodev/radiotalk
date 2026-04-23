@@ -5,7 +5,7 @@ import json
 import os
 import tempfile
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
 
@@ -31,7 +31,9 @@ from .scenario import (
     ScenarioSampler,
     UniformWeighter,
 )
-from .writer import FAILURES_NAME, MANIFEST_NAME, Manifest, ParquetShardWriter
+from .._progress import ProgressLogger
+from .._writer import MANIFEST_NAME
+from .writer import FAILURES_NAME, Manifest, ParquetShardWriter
 
 data_app = typer.Typer(
     add_completion=False, help="Synthetic ATC transcript generation + packaging."
@@ -194,31 +196,7 @@ def generate(
     )
 
     log_path = log_file if log_file is not None else out / "run.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    log_fh = log_path.open("a", buffering=1)
-    start_ts = time.monotonic()
-    last_log = [0.0]
-
-    def _log_line(stats: GenStats, *, force: bool = False) -> None:
-        now = time.monotonic()
-        if not force and now - last_log[0] < log_every:
-            return
-        last_log[0] = now
-        done = stats.ok + stats.failed
-        elapsed = now - start_ts
-        rate = done / elapsed if elapsed > 0 else 0.0
-        left = remaining - done
-        eta = (left / rate) if rate > 0 else float("inf")
-        ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        eta_str = (
-            str(timedelta(seconds=int(eta))) if eta != float("inf") else "inf"
-        )
-        pct = (done / remaining * 100) if remaining else 100.0
-        log_fh.write(
-            f"{ts}  ok={stats.ok}  fail={stats.failed}  "
-            f"rate={rate:.2f}/s  elapsed={timedelta(seconds=int(elapsed))}  "
-            f"eta={eta_str}  pct={pct:.1f}%\n"
-        )
+    logger = ProgressLogger(log_path, total=remaining, log_every=log_every)
 
     try:
         with Progress(
@@ -236,7 +214,9 @@ def generate(
                 progress.update(
                     pbar, completed=stats.ok + stats.failed, ok=stats.ok, fail=stats.failed
                 )
-                _log_line(stats)
+                logger.log(
+                    done=stats.ok + stats.failed, ok=stats.ok, fail=stats.failed,
+                )
 
             stats = asyncio.run(
                 run(
@@ -246,9 +226,12 @@ def generate(
                     on_progress=_on_progress,
                 )
             )
-        _log_line(stats, force=True)
+        logger.log(
+            done=stats.ok + stats.failed, force=True,
+            ok=stats.ok, fail=stats.failed,
+        )
     finally:
-        log_fh.close()
+        logger.close()
 
     console.print(
         f"[green]done:[/] wrote {stats.ok:,} transcripts, "
