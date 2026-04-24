@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 
 import pyarrow as pa
 from pydantic import BaseModel
-
-from .._pa import now_iso, pydantic_to_pa_schema
 
 
 class VoiceRecord(BaseModel):
@@ -21,10 +20,34 @@ class VoiceRecord(BaseModel):
     sub_pool: str | None = None
     gender_hint: str | None = None
     language: str = "en"
+    text: str | None = None
 
 
-_META_SCHEMA = pydantic_to_pa_schema(VoiceRecord)
-VOICE_SCHEMA = pa.schema(list(_META_SCHEMA) + [pa.field("audio", pa.binary())])
+_AUDIO_TYPE = pa.struct([("bytes", pa.binary()), ("path", pa.string())])
+
+VOICE_COLUMNS: tuple[str, ...] = ("voice_id", "audio", "text", "source_clip_id")
+
+
+def _hf_features_metadata() -> dict[bytes, bytes]:
+    features = {
+        "voice_id": {"dtype": "string", "_type": "Value"},
+        "audio": {"sampling_rate": 24000, "_type": "Audio"},
+        "text": {"dtype": "string", "_type": "Value"},
+        "source_clip_id": {"dtype": "string", "_type": "Value"},
+    }
+    payload = json.dumps({"info": {"features": features}})
+    return {b"huggingface": payload.encode("utf-8")}
+
+
+VOICE_SCHEMA = pa.schema(
+    [
+        pa.field("voice_id", pa.string()),
+        pa.field("audio", _AUDIO_TYPE),
+        pa.field("text", pa.string()),
+        pa.field("source_clip_id", pa.string()),
+    ],
+    metadata=_hf_features_metadata(),
+)
 
 
 def voice_id_for(*, source: str, source_speaker_id: str) -> str:

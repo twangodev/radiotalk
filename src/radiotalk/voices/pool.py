@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import pyarrow.parquet as pq
 
@@ -16,11 +15,11 @@ class VoicePoolWriter:
         self,
         writer: ShardedParquetWriter,
         *,
-        existing_records: list[VoiceRecord] | None = None,
+        existing_voice_ids: set[str] | None = None,
     ) -> None:
         self._writer = writer
-        self._records: list[VoiceRecord] = list(existing_records or [])
-        self._seen_voice_ids: set[str] = {r.voice_id for r in self._records}
+        self._records: list[VoiceRecord] = []
+        self._seen_voice_ids: set[str] = set(existing_voice_ids or set())
 
     @classmethod
     def open(
@@ -37,17 +36,17 @@ class VoicePoolWriter:
         writer = ShardedParquetWriter.open(
             out_dir, VOICE_SCHEMA, shard_size, resume=resume, meta=meta,
         )
-        existing: list[VoiceRecord] = []
+        existing: set[str] = set()
         if resume:
-            existing = _read_existing_records(out_dir)
-        return cls(writer, existing_records=existing)
+            existing = _read_existing_voice_ids(out_dir)
+        return cls(writer, existing_voice_ids=existing)
 
     def contains(self, voice_id: str) -> bool:
         return voice_id in self._seen_voice_ids
 
     @property
     def total_voices(self) -> int:
-        return len(self._records)
+        return len(self._seen_voice_ids)
 
     @property
     def records(self) -> list[VoiceRecord]:
@@ -56,8 +55,12 @@ class VoicePoolWriter:
     def add(self, record: VoiceRecord, audio: bytes) -> None:
         if record.voice_id in self._seen_voice_ids:
             return
-        row: dict[str, Any] = record.model_dump()
-        row["audio"] = audio
+        row = {
+            "voice_id": record.voice_id,
+            "audio": {"bytes": audio, "path": None},
+            "text": record.text,
+            "source_clip_id": record.source_clip_id,
+        }
         self._writer.add_row(row)
         self._records.append(record)
         self._seen_voice_ids.add(record.voice_id)
@@ -66,16 +69,14 @@ class VoicePoolWriter:
         self._writer.close()
 
 
-def _read_existing_records(out_dir: Path) -> list[VoiceRecord]:
-    records: list[VoiceRecord] = []
+def _read_existing_voice_ids(out_dir: Path) -> set[str]:
+    ids: set[str] = set()
     idx = 0
     while True:
         shard = out_dir / SHARD_TEMPLATE.format(idx=idx)
         if not shard.exists():
             break
-        table = pq.read_table(shard)
-        for row in table.to_pylist():
-            row.pop("audio", None)
-            records.append(VoiceRecord.model_validate(row))
+        table = pq.read_table(shard, columns=["voice_id"])
+        ids.update(table.column("voice_id").to_pylist())
         idx += 1
-    return records
+    return ids

@@ -17,6 +17,7 @@ class SourceCandidate:
     attribution: str
     gender_hint: str | None = None
     language: str = "en"
+    text: str | None = None
 
 
 class Source(Protocol):

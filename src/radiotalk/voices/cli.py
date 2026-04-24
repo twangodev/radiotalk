@@ -40,7 +40,7 @@ def build(
         str, typer.Option(help="Comma-separated source names. Pilot supports: libritts-r")
     ] = "libritts-r",
     seed: Annotated[int, typer.Option(help="PRNG seed (reserved for future shuffling).")] = 42,
-    min_duration_s: Annotated[float, typer.Option()] = 10.0,
+    min_duration_s: Annotated[float, typer.Option()] = 20.0,
     max_duration_s: Annotated[float, typer.Option()] = 30.0,
     min_rms_dbfs: Annotated[float, typer.Option()] = -40.0,
     shard_size: Annotated[int, typer.Option(help="Rows per parquet shard.")] = 500,

@@ -1,33 +1,39 @@
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
 import numpy as np
 import pyarrow.parquet as pq
+import soundfile as sf
 from typer.testing import CliRunner
 
 from radiotalk.voices.cli import voices_app
-from radiotalk.voices.libritts_r import LibriTTSR
+from radiotalk.voices.libritts_r import LibriTTSR, _BestClip
 from radiotalk.voices.source import SourceInfo, _REGISTRY
 
 
-def _row(speaker: str, clip_id: str, seconds: float = 12.0, sr: int = 24000) -> dict:
-    t = np.linspace(0, seconds, int(seconds * sr), endpoint=False)
+def _clip(speaker: str, clip_id: str, seconds: float = 22.0, sr: int = 24000) -> _BestClip:
+    n = int(seconds * sr)
+    t = np.linspace(0, seconds, n, endpoint=False)
     arr = (0.3 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
-    return {
-        "id": clip_id,
-        "speaker_id": speaker,
-        "audio": {"array": arr, "sampling_rate": sr, "path": f"{clip_id}.wav"},
-    }
+    buf = io.BytesIO()
+    sf.write(buf, arr, sr, format="WAV", subtype="PCM_16")
+    return _BestClip(
+        speaker_id=speaker,
+        clip_id=clip_id,
+        duration_s=seconds,
+        sample_rate=sr,
+        audio_bytes=buf.getvalue(),
+    )
 
 
 def test_build_writes_pool_with_unique_speakers(tmp_path: Path, monkeypatch) -> None:
-    rows = [
-        _row("1034", "a"),
-        _row("1034", "b"),  # same speaker — should be skipped after first
-        _row("1035", "c"),
-        _row("1036", "d", seconds=0.5),  # too short — filtered out
-        _row("1037", "e"),
+    clips = [
+        _clip("1034", "a"),
+        _clip("1035", "c"),
+        _clip("1036", "d", seconds=0.5),  # too short — filtered out
+        _clip("1037", "e"),
     ]
 
     monkeypatch.setitem(
@@ -36,7 +42,7 @@ def test_build_writes_pool_with_unique_speakers(tmp_path: Path, monkeypatch) -> 
         SourceInfo(
             name="libritts-r",
             sub_pool="controller",
-            factory=lambda: LibriTTSR(stream_factory=lambda: iter(rows)),
+            factory=lambda: LibriTTSR(scan_factory=lambda: iter(clips)),
         ),
     )
 
@@ -52,12 +58,14 @@ def test_build_writes_pool_with_unique_speakers(tmp_path: Path, monkeypatch) -> 
     assert len(shards) >= 1
     table = pq.read_table(shards[0])
     assert table.num_rows == 3
-    speakers = sorted(set(table.column("source_speaker_id").to_pylist()))
-    assert speakers == ["1034", "1035", "1037"]
+    assert set(table.column_names) == {"voice_id", "audio", "text", "source_clip_id"}
+    clip_ids = sorted(set(table.column("source_clip_id").to_pylist()))
+    assert clip_ids == ["a", "c", "e"]
 
     for row in table.to_pylist():
-        assert isinstance(row["audio"], bytes)
-        assert len(row["audio"]) > 0
+        assert isinstance(row["audio"], dict)
+        assert isinstance(row["audio"]["bytes"], bytes)
+        assert len(row["audio"]["bytes"]) > 0
 
     notice = (out / "NOTICE.md").read_text()
     assert "libritts-r" in notice

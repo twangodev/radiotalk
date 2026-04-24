@@ -41,6 +41,7 @@ def _record_for(
         sub_pool=sub_pool,
         gender_hint=cand.gender_hint,
         language=cand.language,
+        text=cand.text,
     )
 
 

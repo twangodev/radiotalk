@@ -48,12 +48,14 @@ def test_writer_writes_sharded_parquet_with_audio(tmp_path: Path) -> None:
     assert shard.exists()
     table = pq.read_table(shard)
     assert table.num_rows == 2
-    speakers = set(table.column("source_speaker_id").to_pylist())
-    assert speakers == {"1034", "1035"}
+    assert set(table.column_names) == {"voice_id", "audio", "text", "source_clip_id"}
+    clip_ids = set(table.column("source_clip_id").to_pylist())
+    assert clip_ids == {"1034_x_001", "1035_x_001"}
 
     for row in table.to_pylist():
-        assert isinstance(row["audio"], bytes)
-        assert len(row["audio"]) > 0
+        assert isinstance(row["audio"], dict)
+        assert isinstance(row["audio"]["bytes"], bytes)
+        assert len(row["audio"]["bytes"]) > 0
 
     manifest = tmp_path / "manifest.json"
     assert manifest.exists()

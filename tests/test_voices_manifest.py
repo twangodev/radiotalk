@@ -22,22 +22,8 @@ def _record() -> VoiceRecord:
     )
 
 
-def test_voice_record_roundtrip_through_pyarrow() -> None:
-    rec = _record()
-    row = {**rec.model_dump(), "audio": b"fake-flac-bytes"}
-    table = pa.Table.from_pylist([row], schema=VOICE_SCHEMA)
-    out = table.to_pylist()[0]
-    out.pop("audio")
-    assert VoiceRecord.model_validate(out) == rec
-
-
 def test_voice_schema_has_expected_columns() -> None:
-    names = set(VOICE_SCHEMA.names)
-    assert names == {
-        "voice_id", "source", "source_speaker_id", "source_clip_id",
-        "duration_s", "sample_rate", "license", "attribution",
-        "sub_pool", "gender_hint", "language", "selected_at", "audio",
-    }
+    assert VOICE_SCHEMA.names == ["voice_id", "audio", "text", "source_clip_id"]
 
 
 def test_voice_record_optional_fields_default_to_none() -> None:
