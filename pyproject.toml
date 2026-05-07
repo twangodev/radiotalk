@@ -1,27 +1,49 @@
 [project]
 name = "radiotalk"
 version = "0.1.0"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "airportsdata>=20260315",
-    "datasets>=4.8.4",
+    "hf-transfer>=0.1.9",
+    "num2words>=0.5.13",
     "numpy>=2.4.4",
-    "openai>=2.32.0",
     "pyarrow>=24.0.0",
     "pydantic>=2",
-    "pyyaml>=6.0.3",
     "rich>=15.0.0",
-    "soundfile>=0.13.1",
-    "tenacity>=9.1.4",
-    "torch>=2.11.0",
-    "torchcodec>=0.11.1",
     "typer>=0.24.1",
 ]
 
 [project.optional-dependencies]
+data = [
+    "openai>=2.32.0",
+    "pyyaml>=6.0.3",
+    "tenacity>=9.1.4",
+]
+voices = [
+    "datasets>=4.8.4",
+    "soundfile>=0.13.1",
+    "torch>=2.11.0",
+    "torchcodec>=0.11.1",
+]
+audio = [
+    "datasets>=4.8.4",
+    "hume-tada",
+    "soundfile>=0.13.1",
+    "torch>=2.11.0",
+    "torchcodec>=0.11.1",
+    "transformers<5",
+]
 hf = [
-    "huggingface-hub>=1.11.0",
     "hf-transfer>=0.1.9",
+    "huggingface-hub>=1.11.0",
+]
+
+[tool.uv.sources]
+hume-tada = { git = "https://github.com/twangodev/tada", branch = "main" }
+
+[tool.uv]
+conflicts = [
+    [{ extra = "hf" }, { extra = "audio" }],
 ]
 
 [project.scripts]
