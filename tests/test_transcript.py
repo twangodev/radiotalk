@@ -81,7 +81,6 @@ def test_transcript_roundtrip():
     t = Transcript(
         scenario_id=sc.scenario_id,
         scenario=sc,
-        raw_text=raw,
         turns=turns,
         model="test",
         generated_at=datetime.now(timezone.utc),
@@ -89,7 +88,6 @@ def test_transcript_roundtrip():
         taxonomy_version="t1",
     )
     dumped = t.model_dump()
-    assert dumped["raw_text"] == raw
     assert dumped["prompt_version"] == "p2"
     assert dumped["scenario_id"] == sc.scenario_id
     assert len(dumped["turns"]) == 4
