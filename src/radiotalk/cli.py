@@ -23,7 +23,16 @@ def _add_audio_typer() -> None:
     app.add_typer(audio_app, name="audio")
 
 
+def _add_radio_typer() -> None:
+    try:
+        from .radio.cli import radio_app
+    except ImportError:
+        return
+    app.add_typer(radio_app, name="radio")
+
+
 _add_audio_typer()
+_add_radio_typer()
 
 
 @app.command()

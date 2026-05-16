@@ -37,6 +37,13 @@ hf = [
     "hf-transfer>=0.1.9",
     "huggingface-hub>=1.11.0",
 ]
+radio = [
+    "audiomentations>=0.43.1",
+    "datasets>=4.8.4",
+    "pedalboard>=0.9.22",
+    "scipy>=1.17.1",
+    "soundfile>=0.13.1",
+]
 
 [tool.uv.sources]
 hume-tada = { git = "https://github.com/twangodev/tada", branch = "main" }
