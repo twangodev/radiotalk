@@ -98,7 +98,11 @@ class ShardedParquetWriter:
         shard_path = self.out_dir / SHARD_TEMPLATE.format(idx=next_idx)
         tmp_path = shard_path.with_suffix(shard_path.suffix + ".tmp")
         table = pa.Table.from_pylist(self._buffer, schema=self.schema)
-        pq.write_table(table, tmp_path, compression="zstd")
+        pq.write_table(
+            table, tmp_path, compression="snappy",
+            row_group_size=100,
+            write_page_index=True,
+        )
         os.replace(tmp_path, shard_path)
         self._last_shard_index = next_idx
         self._total_rows += len(self._buffer)
