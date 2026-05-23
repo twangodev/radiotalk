@@ -42,14 +42,19 @@ def _request_kwargs(cfg: RuntimeConfig) -> dict:
 
     Plaintext output — no response_format, no grammar backend. The model is
     prompted to emit `SPEAKER: utterance` lines and we parse them post-hoc.
-    Qwen3's reasoning mode is disabled: the dataset wants the transcript, not
-    the CoT, and disabling it ~5xs throughput.
+
+    Qwen3's reasoning mode is ENABLED in v2/p3 onward: testing showed it
+    materially improves SID/waypoint pronunciation realism (+15-20 pts
+    plausibility on the LLM-as-judge eval). SGLang is launched with
+    --reasoning-parser qwen3, so message.reasoning_content holds the trace
+    and message.content stays clean. Costs ~5x more completion tokens and
+    ~3-5x wall-clock per request.
     """
     return {
         "model": cfg.model,
         "temperature": cfg.temperature,
         "max_tokens": cfg.max_tokens,
-        "extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
+        "extra_body": {"chat_template_kwargs": {"enable_thinking": True}},
     }
 
 

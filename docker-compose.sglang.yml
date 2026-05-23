@@ -39,6 +39,7 @@ services:
           --fp4-gemm-backend flashinfer_cudnn \
           --kv-cache-dtype bf16 \
           --disable-piecewise-cuda-graph \
+          --reasoning-parser qwen3 \
           --host 0.0.0.0 \
           --port 30000
     deploy:

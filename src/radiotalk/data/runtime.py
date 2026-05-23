@@ -18,7 +18,9 @@ class RuntimeConfig:
     out_dir: Path
     concurrency: int = 96
     temperature: float = 0.9
-    max_tokens: int = 1024
+    # Bumped to 4096 in v2/p3 — thinking mode reserves ~2-3k tokens for the
+    # reasoning trace, leaving ~1-2k for the actual transcript.
+    max_tokens: int = 4096
     shard_size: int = 10_000
     seed: int = 42
     weighter_name: str = "tier_v1"
@@ -27,7 +29,11 @@ class RuntimeConfig:
     prompt_version: str = PROMPT_VERSION
     taxonomy_version: str = TAXONOMY_VERSION
     max_retries: int = 5
-    max_parse_retries: int = 5
+    # Bumped from 5 to 8 in v6.2 — the post-gen realism validator rejects
+    # ~10-15% of first-attempt outputs (forbidden fillers, role violations,
+    # ARTCC drift). Some scenarios are sticky — 8 retries pushes the
+    # shipped-failure rate below 1% at ~30% wall-time overhead.
+    max_parse_retries: int = 8
 
     def fingerprint(self) -> str:
         """Hash of fields that must match for a resume to be valid."""
