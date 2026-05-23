@@ -31,8 +31,15 @@ def test_us_config_has_all_required_sections():
     # Tier weights + at least one tier-1 hub
     assert cfg.tier_weights.tiers[1] > cfg.tier_weights.tiers[2]
     assert cfg.airport_tiers["KSFO"] == 1
-    # All operator classes present in both weights and prefixes
-    assert set(cfg.operator_weights.keys()) == set(cfg.operator_prefixes.keys())
+    # Every operator class with a non-zero weight is covered by the
+    # operators registry (FAA-sourced) OR falls through to N-number generation
+    # (ga / training / rotorcraft classes the FAA doesn't enumerate).
+    from radiotalk.data.operators import prefixes_by_class
+    fallback_to_n_number = {"ga", "training"}
+    registry = prefixes_by_class()
+    for cls, weight in cfg.operator_weights.items():
+        if weight > 0 and cls not in fallback_to_n_number:
+            assert registry.get(cls), f"{cls} weighted but no operators registered"
     # Event weights cover the expected buckets
     assert cfg.event_weights["routine"] > 50.0
     assert "emergency_medical" in cfg.event_weights

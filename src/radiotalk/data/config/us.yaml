@@ -13,7 +13,15 @@ allowed_regions: [us]
 tier_weights:
   "1": 50.0      # major hubs
   "2": 10.0      # regionals
-  default: 1.0   # everything else (small towered + uncontrolled fields)
+  default: 0.0   # v6.3: zero-weight the long tail. The default bucket was
+                 # ~10000 small/uncontrolled airports, and at weight 1.0
+                 # dominated sampling — ~80% of generated scenarios hit a
+                 # gravel strip or uncontrolled field, producing widebody-at-
+                 # tiny-airport scenarios and fabricated Tower controllers at
+                 # CTAF-only fields. Zeroing this restricts sampling to the
+                 # 85 named tier 1+2 airports (all towered, all with TRACON
+                 # or Center coverage), eliminating the dominant remaining
+                 # realism failure class.
 
 airport_tiers:
   # ─── Tier 1 — major US hubs ───
@@ -108,28 +116,31 @@ airport_tiers:
 # ────────────────────────────────────────────────────────────────────────────
 # Operator class distribution
 # ────────────────────────────────────────────────────────────────────────────
+# v6.6 — rebalanced against FAA FY2024 Air Traffic By The Numbers:
+# - GA = ~42% of 38.9M tower ops nationally
+# - Military = 2-4% of FAA tower ops historically
+# - Part 135 air taxi = 15-25% of tower ops
+# - Part 121 air carrier (commercial+cargo) = 30-40% of tower ops, 60-70% of
+#   center ops
+# Original v5 mix had military at 8% (2x reality) and GA at 25% (under by ~15
+# pts). Reviewers in v6.4 found military callsign/airframe mismatches
+# (CAP/F-35, Reach/F-16, Pat/F-35) as the dominant remaining failure class —
+# cutting military weight directly reduces that error class proportionally.
 operator_weights:
-  commercial: 45.0
-  cargo: 7.0
-  ga: 25.0
-  business: 5.0
-  military: 8.0
-  training: 7.0
-  rotorcraft: 2.0
-  medevac: 1.0
+  commercial: 42.0   # Part 121 — was 45
+  cargo: 6.0         # subset of Part 121 — was 7
+  ga: 30.0           # Part 91 — was 25, bumped to match tower reality
+  business: 10.0     # Part 135 charter — was 5, was way underweight
+  military: 4.0      # all services — was 8 (2x FAA reality)
+  training: 5.0      # subset of GA, separate for callsign telephony — was 7
+  rotorcraft: 2.0    # unchanged
+  medevac: 1.0       # unchanged
 
-# Callsign prefixes per operator class. ga/training/rotorcraft use US N-numbers.
-operator_prefixes:
-  commercial: [AAL, DAL, UAL, SWA, JBU, ASA, NKS, FFT, SKW,
-               BAW, DLH, AFR, KLM, ELY, UAE, QTR, SIA, ANA,
-               JAL, QFA, ACA, LAN, IBE, SAS, FIN, VIR]
-  cargo: [FDX, UPS, GTI, ABX, CLX, CKS, ABW]
-  business: [EJA, XOJ, NJA, FLX]
-  medevac: [LIFEGUARD, MED, LFG]
-  military: [REACH, CNV, ARMY, NAVY, SHELL, PAT]
-  ga: []
-  training: []
-  rotorcraft: []
+# NOTE: per-class callsign prefixes used to live here. They've moved to
+# src/radiotalk/data/seed/operators.csv, sourced from FAA JO 7340.2 Chapter 3
+# §3 plus a small supplementary list. See scripts/build_operators_csv.py and
+# radiotalk.data.operators.prefixes_by_class(). ga and training classes still
+# fall through to US N-numbers (no FAA designator).
 
 # ────────────────────────────────────────────────────────────────────────────
 # Event distribution: ~80% routine, ~15% abnormals, ~5% emergencies, ~1% rare
@@ -162,26 +173,40 @@ event_weights:
 # ────────────────────────────────────────────────────────────────────────────
 # Traffic + roster
 # ────────────────────────────────────────────────────────────────────────────
+# v6.6 — tier-1+2 hubs dominate sampling (per us.yaml airport_tiers), so
+# the long tail of "light"-density small airports is no longer over-
+# represented. Bump heavy and moderate, trim light.
 traffic_density_weights:
-  light: 30
-  moderate: 50
-  heavy: 20
+  light: 20      # was 30
+  moderate: 50   # unchanged
+  heavy: 30      # was 20
 
-# Number of aircraft on the frequency, by traffic density.
+# Number of aircraft on the frequency, by traffic density. Bumped upper
+# bounds: at major hubs during peak, a frequency commonly has 8-12 aircraft.
 traffic_aircraft_range:
   light: [1, 2]
-  moderate: [2, 4]
-  heavy: [5, 8]
+  moderate: [2, 5]      # was [2, 4]
+  heavy: [5, 10]        # was [5, 8]
 
 # ────────────────────────────────────────────────────────────────────────────
 # Phase + frequency bands
 # ────────────────────────────────────────────────────────────────────────────
+# v6.6 — was equal 1:1:1:1:1 which is wildly unrealistic. Real-world ATC
+# VHF voice (what ASR training actually targets):
+# - Tower + approach dominate the captured / listenable / interesting
+#   traffic (LiveATC-style feeds, ATCO2 corpus, MITRE study).
+# - Center is much sparser (mostly silent IFR cruise; long checkins
+#   between facilities).
+# - Ground is high-volume but procedurally simpler.
+# - Ramp is private frequencies not normally captured for ASR training.
+# Weighted to roughly match what's publicly captured + what an ASR model
+# actually needs heavy coverage on.
 phase_weights:
-  ground: 1
-  tower: 1
-  approach: 1
-  center: 1
-  ramp: 1
+  tower: 30      # most varied ATC activity, was 1
+  approach: 25   # high-density vectoring + ILS, was 1
+  ground: 20     # high-volume taxi, was 1
+  center: 15     # en-route handoffs, sparse, was 1
+  ramp: 10       # pushback only, limited, was 1
 
 # VHF aircraft band assignments per phase (MHz).
 phase_frequency_bands:
@@ -194,11 +219,13 @@ phase_frequency_bands:
 # ────────────────────────────────────────────────────────────────────────────
 # Time of day
 # ────────────────────────────────────────────────────────────────────────────
+# v6.6 — real US ATC traffic by hour: ~70% daytime (6am-7pm), ~25% night,
+# ~5% dawn+dusk combined. Slight diversity bias toward night for ASR.
 time_of_day_weights:
-  day: 55
-  night: 25
-  dawn: 10
-  dusk: 10
+  day: 65      # was 55
+  night: 25    # unchanged
+  dawn: 5      # was 10
+  dusk: 5      # was 10
 
 # ────────────────────────────────────────────────────────────────────────────
 # Runway + procedure naming
@@ -212,15 +239,24 @@ runway_suffix_weights:
 
 # Probability the focal aircraft has no SID/STAR in approach/tower/center phases.
 # (ground/ramp phases are always None regardless of this value.)
-sid_star_none_chance: 0.35
+# v2/p3: set to 0.9 (10% of scenarios get a SID). The sampler still
+# synthesizes random 4-letter codes (a real CIFP-sourced registry is future
+# work), but the new WAYPOINT PRONUNCIATION rule in prompt_system.txt teaches
+# the model to phonetically transform whatever code appears. Combined with
+# thinking mode, this produces reasonable spoken forms even for synthesized
+# codes — much better than the v1 fake-then-letter-spelled outputs.
+sid_star_none_chance: 0.9
 
 # ────────────────────────────────────────────────────────────────────────────
 # Weather
 # ────────────────────────────────────────────────────────────────────────────
 weather:
+  # v6.6 — real US commercial year-round average is ~85% VMC / ~15% IMC.
+  # Previous 75/25 over-sampled IMC for phraseology diversity, but with
+  # v6.x the model now handles IMC phraseology well; rebalance to reality.
   vmc_imc_weights:
-    VMC: 75
-    IMC: 25
+    VMC: 82
+    IMC: 18
   vmc_vis_sm: [5.0, 10.0]
   imc_vis_sm: [0.25, 3.0]
   vmc_ceiling_chance: 0.4         # P(ceiling != null | VMC)

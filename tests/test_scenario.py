@@ -160,8 +160,8 @@ def test_aircraft_list_size_scales_with_traffic_density():
     assert all(n >= 1 for ns in by_density.values() for n in ns)
     # Density categories observe their bounds.
     assert all(1 <= n <= 2 for n in by_density["light"])
-    assert all(2 <= n <= 4 for n in by_density["moderate"])
-    assert all(5 <= n <= 8 for n in by_density["heavy"])
+    assert all(2 <= n <= 5 for n in by_density["moderate"])
+    assert all(5 <= n <= 10 for n in by_density["heavy"])
     # Heavy on average has more than light.
     avg = lambda xs: sum(xs) / len(xs)  # noqa: E731
     assert avg(by_density["heavy"]) > avg(by_density["light"])

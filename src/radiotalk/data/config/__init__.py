@@ -88,7 +88,8 @@ class RegionConfig(BaseModel):
     airport_tiers: dict[str, int]
 
     operator_weights: dict[OperatorClass, float]
-    operator_prefixes: dict[OperatorClass, list[str]]
+    # operator_prefixes moved to data/seed/operators.csv (sourced from FAA JO
+    # 7340.2). See radiotalk.data.operators.prefixes_by_class().
 
     event_weights: dict[Event, float]
 

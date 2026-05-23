@@ -78,6 +78,35 @@ Wake = Literal["L", "M", "H", "J"]
 
 TOWERED_PHASES: tuple[Phase, ...] = ("ground", "tower", "approach", "center")
 
+# Phases where the aircraft is airborne (vs. on the surface). v6.6 gates
+# certain events to airborne-only — e.g. emergency_pressurization, _hydraulic,
+# _flight_control, nordo, minimum_fuel_advisory, diversion don't make sense
+# at a pushback or taxi gate.
+_AIRBORNE_PHASES: frozenset[Phase] = frozenset({"tower", "approach", "center"})
+_SURFACE_PHASES: frozenset[Phase] = frozenset({"ground", "ramp"})
+
+# Per-event valid phase set. Events not listed accept any phase.
+_EVENT_PHASE_CONSTRAINTS: dict[str, frozenset[Phase]] = {
+    # Airborne-only events: physically can't happen on the ground.
+    "go_around": frozenset({"tower", "approach"}),
+    "missed_approach": frozenset({"approach", "tower"}),
+    "hold": frozenset({"approach", "center"}),
+    "weather_deviation": _AIRBORNE_PHASES,
+    "pirep": _AIRBORNE_PHASES,
+    "emergency_fuel": _AIRBORNE_PHASES,
+    "emergency_bird_strike": frozenset({"tower", "approach"}),
+    "emergency_pressurization": frozenset({"approach", "center"}),
+    "emergency_hydraulic": _AIRBORNE_PHASES,
+    "emergency_flight_control": _AIRBORNE_PHASES,
+    "nordo": _AIRBORNE_PHASES,
+    "minimum_fuel_advisory": _AIRBORNE_PHASES,
+    "diversion": _AIRBORNE_PHASES,
+    # Surface-or-airborne events: any phase fine for these.
+    # routine, traffic_advisory, runway_change, equipment_issue,
+    # navigation_issue, emergency_medical, emergency_mechanical,
+    # emergency_fire, emergency_electrical, priority_handling.
+}
+
 
 class Weather(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -151,9 +180,15 @@ class Scenario(BaseModel):
     def is_towered(self) -> bool:
         return self.phase in TOWERED_PHASES
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def artcc(self) -> str | None:
+        from .artcc import artcc_for_icao
+        return artcc_for_icao(self.icao)
+
     _COMPUTED = frozenset({
         "callsign", "aircraft_type", "wake", "operator_class",
-        "n_aircraft", "is_emergency", "is_towered",
+        "n_aircraft", "is_emergency", "is_towered", "artcc",
     })
 
     @property
@@ -391,6 +426,12 @@ class ScenarioSampler:
             raise ValueError(
                 f"No airports left after filtering to regions={sorted(self._allowed_regions)}."
             )
+        # If the region filter zeroes out every named-tier airport (e.g. the
+        # us.yaml tier list has no Canadian airports), fall back to uniform
+        # weighting within the filtered pool — better than crashing on
+        # rng.choices(weights=[0,0,...]).
+        if sum(self._icao_weights) == 0:
+            self._icao_weights = [1.0] * len(self._icaos)
 
         aircraft = _load_aircraft()
         self._aircraft_by_class: dict[OperatorClass, list[dict]] = {}
@@ -464,7 +505,7 @@ class ScenarioSampler:
         n_aircraft = rng.randint(n_lo, n_hi)
         aircraft_list = [self._sample_aircraft(rng) for _ in range(n_aircraft)]
 
-        runway = self._sample_runway(rng)
+        runway = self._sample_runway(rng, icao)
         sid_star = self._sample_sid_star(rng, phase)
         squawk = self._sample_squawk(rng)
         freq_lo, freq_hi = cfg.phase_frequency_bands[phase]
@@ -473,7 +514,7 @@ class ScenarioSampler:
         time_of_day: TimeOfDay = rng.choices(
             self._tod, weights=self._tod_weights, k=1
         )[0]
-        event: Event = rng.choices(self._events, weights=self._event_weights, k=1)[0]
+        event: Event = self._sample_compatible_event(rng, phase)
         return Scenario(
             icao=icao,
             region=region,
@@ -489,12 +530,37 @@ class ScenarioSampler:
             event=event,
         )
 
+    def _sample_compatible_event(self, rng: random.Random, phase: Phase) -> Event:
+        """Pick an event that's semantically valid for this phase.
+
+        Resamples up to a few times if the first draw is incompatible (e.g.
+        emergency_pressurization picked at phase=ramp). With most events
+        compatible with most phases, this resolves in ~1-2 draws on average.
+        """
+        for _ in range(8):
+            event: Event = rng.choices(
+                self._events, weights=self._event_weights, k=1
+            )[0]
+            allowed = _EVENT_PHASE_CONSTRAINTS.get(event)
+            if allowed is None or phase in allowed:
+                return event
+        # If we somehow exhausted retries (shouldn't with the current weights),
+        # fall back to routine — always valid.
+        return "routine"  # type: ignore[return-value]
+
     def _sample_aircraft(self, rng: random.Random) -> Aircraft:
         operator_class: OperatorClass = rng.choices(
             self._operators, weights=self._operator_weights, k=1
         )[0]
-        aircraft = rng.choice(self._aircraft_by_class[operator_class])
-        callsign = self._sample_callsign(rng, operator_class)
+        # Pick an aircraft + callsign together. For military, enforce
+        # service-aircraft compatibility (Navy doesn't fly F-16, Army doesn't
+        # fly F-18, etc.). For other classes the operator pool already
+        # constrains realistically.
+        if operator_class == "military":
+            aircraft, callsign = self._sample_military(rng)
+        else:
+            aircraft = rng.choice(self._aircraft_by_class[operator_class])
+            callsign = self._sample_callsign(rng, operator_class)
         return Aircraft(
             callsign=callsign,
             aircraft_type=aircraft["icao_type"],
@@ -502,20 +568,91 @@ class ScenarioSampler:
             operator_class=operator_class,
         )
 
+    # ── Military service ↔ airframe compatibility ────────────────────────
+    # Each ICAO callsign prefix maps to the airframes that service actually
+    # operates. Eliminates v6.4 reviewer-flagged mismatches like CAP/F-35
+    # (handled by reclassifying CAP→ga) and Navy/F-16, Army/F-18,
+    # Reach/F-35. Verified against US military air branch inventories.
+    _MIL_OPERATOR_AIRCRAFT: dict[str, tuple[str, ...]] = {
+        # AMC airlift — only heavy strategic transport
+        "RCH":    ("C17", "C30J", "K35R"),
+        # USAF VIP — only executive transport (we lack VC-25/C-32, use C30J as proxy)
+        "AIO":    ("C30J",),
+        "SAM":    ("C30J",),
+        # KC-135/KC-46 tankers
+        "SHELL":  ("K35R",),
+        "QID":    ("K35R",),
+        # Air National Guard — fighters, tankers, lift
+        "GUARD":  ("F16", "K35R", "C30J", "H60"),
+        # US Navy — Hornet, Lightning, Poseidon, Seahawk
+        "NAVY":   ("F18", "F35", "P8", "H60"),
+        # US Marine Corps — Hornet, Lightning, Osprey, Sea Knight
+        "MARINE": ("F18", "F35", "V22", "H60"),
+        # Coast Guard — primarily MH-60 Jayhawk (HH-65/HC-130 not in registry)
+        "COAST":  ("H60",),
+        # Convoy = USN logistics (C-9/C-40/C-130) — use C-130 proxy
+        "CNV":    ("C30J",),
+        # US Army — Black Hawk, Chinook (and C-12 not in registry)
+        "ARMY":   ("H60", "H47"),
+        "USR":    ("H60", "H47"),
+    }
+
+    def _sample_military(self, rng: random.Random) -> tuple[dict, str]:
+        from .operators import prefixes_by_class
+        all_prefixes = list(prefixes_by_class().get("military", ()))
+        # Loop until we get a compatible operator+aircraft pair. With our
+        # tables this terminates fast (>95% of mil prefixes have ≥1 valid
+        # airframe in aircraft.csv).
+        mil_pool = self._aircraft_by_class["military"]
+        ac_by_type = {ac["icao_type"]: ac for ac in mil_pool}
+        for _attempt in range(20):
+            prefix = rng.choice(all_prefixes)
+            allowed = self._MIL_OPERATOR_AIRCRAFT.get(prefix)
+            if allowed:
+                candidates = [ac_by_type[t] for t in allowed if t in ac_by_type]
+                if candidates:
+                    aircraft = rng.choice(candidates)
+                    suffix = str(rng.randint(10, 9999))
+                    return aircraft, f"{prefix}{suffix}"
+            else:
+                # Prefix not in compatibility table — fall through to any
+                # military airframe (preserves coverage of less-common
+                # prefixes the table doesn't enumerate).
+                aircraft = rng.choice(mil_pool)
+                suffix = str(rng.randint(10, 9999))
+                return aircraft, f"{prefix}{suffix}"
+        # Fallback if 20 attempts somehow all fail — random
+        aircraft = rng.choice(mil_pool)
+        prefix = rng.choice(all_prefixes)
+        return aircraft, f"{prefix}{rng.randint(10, 9999)}"
+
     def _sample_callsign(
         self, rng: random.Random, operator_class: OperatorClass
     ) -> str:
-        prefixes = self._cfg.operator_prefixes.get(operator_class, [])
+        from .operators import prefixes_by_class
+        prefixes = prefixes_by_class().get(operator_class, ())
         if not prefixes:
-            # GA-style US N-number.
-            digits = rng.randint(1, 5)
+            # GA / training: no FAA designator, so synthesize a US N-number.
+            # FAA N-numbers are 1-5 chars after N, but single-digit forms
+            # (N1, N5) are virtually never used at scale — the realistic
+            # distribution is 3-5 digits with optional 1-2 trailing letters.
+            # Minimum 2 digits avoids unrealistic "N9"-style scenarios.
+            digits = rng.randint(2, 5)
             n = "".join(str(rng.randint(0, 9)) for _ in range(digits))
             return f"N{n}"
         prefix = rng.choice(prefixes)
-        suffix = str(rng.randint(1, 9999))
+        suffix = str(rng.randint(10, 9999))
         return f"{prefix}{suffix}"
 
-    def _sample_runway(self, rng: random.Random) -> str:
+    def _sample_runway(self, rng: random.Random, icao: str) -> str:
+        """Pick a runway. Prefers a real one from the airport's runway list
+        (via radiotalk.data.runways); falls back to a random 01-36 designator
+        when the airport isn't in the tier 1+2 lookup table (which shouldn't
+        happen with v6.3 sampling tightening, but is kept as a safety net)."""
+        from .runways import runways_for
+        real = runways_for(icao)
+        if real:
+            return rng.choice(real)
         heading = rng.randint(1, 36)
         side = rng.choices(self._rw_suffixes, weights=self._rw_suffix_weights, k=1)[0]
         return f"{heading:02d}{side}"
