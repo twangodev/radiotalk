@@ -34,7 +34,7 @@ def _chat_completion_response(content: str) -> dict:
     }
 
 
-_FOCAL_RE = re.compile(r"Focal aircraft:\s*(\S+)")
+_FOCAL_RE = re.compile(r"Focal aircraft ICAO callsign:\s*(\S+)")
 
 
 def _focal_from_request(request: httpx.Request) -> str:
@@ -46,10 +46,12 @@ def _focal_from_request(request: httpx.Request) -> str:
 
 
 def _plaintext_for_callsign(cs: str) -> str:
+    # Use a generic-but-valid facility tag so the role-discipline +
+    # controller-presence validators see a real controller voice.
     return (
-        f"ATC: {cs}, contact tower one two one point niner\n"
-        f"{cs}: tower one two one point niner, {cs}\n"
-        f"ATC: {cs}, cleared for takeoff\n"
+        f"KZZZ_TWR: {cs}, contact tower one two one decimal niner\n"
+        f"{cs}: tower one two one decimal niner, {cs}\n"
+        f"KZZZ_TWR: {cs}, cleared for takeoff\n"
         f"{cs}: cleared for takeoff, {cs}\n"
     )
 
