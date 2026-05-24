@@ -12,9 +12,9 @@ app.add_typer(voices_app, name="voices")
 
 
 def _add_audio_typer() -> None:
-    """Audio subcommand requires the `tts` extra (heavy: torch, transformers,
-    hume-tada). Import lazily so `radiotalk data` / `radiotalk voices` work
-    without the extra installed.
+    """Audio subcommand requires the `audio` extra (heavy: torch,
+    transformers) plus the TTS engine of the day. Import lazily so
+    `radiotalk data` / `radiotalk voices` work without it installed.
     """
     try:
         from .audio.cli import audio_app
