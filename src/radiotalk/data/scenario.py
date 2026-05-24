@@ -629,20 +629,34 @@ class ScenarioSampler:
     def _sample_callsign(
         self, rng: random.Random, operator_class: OperatorClass
     ) -> str:
-        from .operators import prefixes_by_class
-        prefixes = prefixes_by_class().get(operator_class, ())
-        if not prefixes:
-            # GA / training: no FAA designator, so synthesize a US N-number.
-            # FAA N-numbers are 1-5 chars after N, but single-digit forms
-            # (N1, N5) are virtually never used at scale — the realistic
-            # distribution is 3-5 digits with optional 1-2 trailing letters.
-            # Minimum 2 digits avoids unrealistic "N9"-style scenarios.
-            digits = rng.randint(2, 5)
-            n = "".join(str(rng.randint(0, 9)) for _ in range(digits))
-            return f"N{n}"
-        prefix = rng.choice(prefixes)
+        """Pick a callsign using ADS-B-derived activity weights so American/
+        Delta/United dominate the commercial pool instead of being lost in a
+        uniform 700-operator draw.
+
+        The synthetic "N" prefix in the weights table triggers random
+        N-number synthesis — that's how >99% of GA picks resolve.
+        """
+        from .operators import weighted_prefixes_by_class
+        weighted = weighted_prefixes_by_class().get(operator_class, ())
+        if not weighted:
+            # No weight data for this class — emit a random N-number.
+            return self._synth_n_number(rng)
+        prefixes = [p for p, _ in weighted]
+        weights = [w for _, w in weighted]
+        prefix = rng.choices(prefixes, weights=weights, k=1)[0]
+        if prefix == "N":
+            return self._synth_n_number(rng)
         suffix = str(rng.randint(10, 9999))
         return f"{prefix}{suffix}"
+
+    @staticmethod
+    def _synth_n_number(rng: random.Random) -> str:
+        """Synthesize a US N-number. FAA allows 1-5 chars after N (digits or
+        digits + 1-2 trailing letters); single-digit forms are virtually
+        never used in practice, so the sampler enforces 2-5 digits."""
+        digits = rng.randint(2, 5)
+        n = "".join(str(rng.randint(0, 9)) for _ in range(digits))
+        return f"N{n}"
 
     def _sample_runway(self, rng: random.Random, icao: str) -> str:
         """Pick a runway. Prefers a real one from the airport's runway list
