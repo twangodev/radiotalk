@@ -16,49 +16,17 @@ import torch
 from ..normalize import normalize
 from .assign import assign, unique_speakers
 from .encode import encode_audio
-from .model import (
-    NUM_TRANSITION_STEPS,
-    LoadedTada,
-    make_locked_inference_options,
-)
+from .model import HIGGS_MODEL_ID, HiggsInferenceOptions, LoadedHiggs
 from .schema import AudioBytes, AudioTurnRow, SAMPLE_RATE
-from .staging import Staging, decode_tokens, encode_tokens
-from .tokens import extract_token_spans
+from .staging import Staging
 from .writer import AudioShardWriter
 
 
 FAILURES_NAME = "failures.jsonl"
 MAX_SYNTH_ATTEMPTS = 3
 MAX_WPM = 300.0
+MIN_DUR_S = 0.30
 MIN_OOM_BATCH = 4
-
-
-def _generate_oom_safe(loaded, prompt, texts, opts):
-    audios: list = []
-    times: list = []
-    pos = 0
-    sub = len(texts)
-    while pos < len(texts):
-        end = min(pos + sub, len(texts))
-        try:
-            output = loaded.model.generate(
-                prompt=prompt, text=texts[pos:end],
-                num_transition_steps=NUM_TRANSITION_STEPS,
-                inference_options=opts,
-            )
-            audios.extend(output.audio)
-            times.extend(output.time_before)
-            pos = end
-        except torch.cuda.OutOfMemoryError:
-            torch.cuda.empty_cache()
-            if sub <= MIN_OOM_BATCH:
-                for _ in range(end - pos):
-                    audios.append(None)
-                    times.append(torch.tensor([]))
-                pos = end
-            else:
-                sub = max(sub // 2, MIN_OOM_BATCH)
-    return audios, times
 
 
 @dataclass
@@ -82,18 +50,22 @@ class _QueueItem:
     last_reason: str = ""
 
 
-def synth_config_fingerprint(model_id: str, opts) -> str:
+@dataclass
+class _VoiceRef:
+    ref_path: Path
+    ref_text: str
+
+
+def synth_config_fingerprint(model_id: str, opts: HiggsInferenceOptions) -> str:
     payload = {
         "tts_model": model_id,
-        "num_flow_matching_steps": opts.num_flow_matching_steps,
-        "num_acoustic_candidates": opts.num_acoustic_candidates,
-        "scorer": opts.scorer,
-        "speed_up_factor": opts.speed_up_factor,
-        "acoustic_cfg_scale": opts.acoustic_cfg_scale,
-        "duration_cfg_scale": opts.duration_cfg_scale,
-        "noise_temperature": opts.noise_temperature,
-        "num_transition_steps": NUM_TRANSITION_STEPS,
+        "max_new_tokens": opts.max_new_tokens,
+        "do_sample": opts.do_sample,
+        "temperature": opts.temperature,
+        "top_p": opts.top_p,
         "sample_rate": SAMPLE_RATE,
+        "max_wpm": MAX_WPM,
+        "min_dur_s": MIN_DUR_S,
     }
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True).encode()
@@ -120,21 +92,93 @@ def gather_voice_queue(
     return assignments, voice_queue
 
 
+def encode_voice_pool(
+    loaded: LoadedHiggs,
+    voices_ds,
+    voice_ids_needed: Iterable[str],
+    ref_dir: Path,
+) -> dict[str, _VoiceRef]:
+    """Materialize the reference WAV for each voice on disk and capture its
+    transcript text. Higgs's AutoProcessor consumes the audio reference as a
+    file URL, so we stage WAVs once per voice instead of carrying tensors."""
+    ref_dir.mkdir(parents=True, exist_ok=True)
+    voice_index = {vid: i for i, vid in enumerate(voices_ds["voice_id"])}
+    cache: dict[str, _VoiceRef] = {}
+    for vid in dict.fromkeys(voice_ids_needed):
+        row = voices_ds[voice_index[vid]]
+        path = ref_dir / f"{vid}.wav"
+        if not path.exists():
+            arr, sr = _decode_audio_field(row["audio"])
+            import soundfile as sf
+            sf.write(path, arr, sr)
+        cache[vid] = _VoiceRef(ref_path=path, ref_text=str(row["text"]))
+    return cache
+
+
+def _generate_oom_safe(
+    loaded: LoadedHiggs,
+    voice_ref: _VoiceRef,
+    texts: list[str],
+    opts: HiggsInferenceOptions,
+) -> list[np.ndarray | None]:
+    """Run model.generate over `texts` (all sharing voice_ref) with auto-halving
+    batch size on CUDA OOM. Returns one float32 array (or None on failure)
+    per input text, in order."""
+    out: list[np.ndarray | None] = [None] * len(texts)
+    pos = 0
+    sub = len(texts)
+    while pos < len(texts):
+        end = min(pos + sub, len(texts))
+        chunk = texts[pos:end]
+        convs = [
+            loaded.build_conversation(voice_ref.ref_text, voice_ref.ref_path, t)
+            for t in chunk
+        ]
+        try:
+            inputs = loaded.processor.apply_chat_template(
+                convs, add_generation_prompt=True, tokenize=True,
+                return_dict=True, sampling_rate=loaded.sampling_rate,
+                return_tensors="pt", padding=True,
+            ).to(loaded.model.device)
+            with torch.inference_mode():
+                gen = loaded.model.generate(
+                    **inputs,
+                    max_new_tokens=opts.max_new_tokens,
+                    do_sample=opts.do_sample,
+                    temperature=opts.temperature if opts.do_sample else 1.0,
+                    top_p=opts.top_p if opts.do_sample else 1.0,
+                )
+            decoded = loaded.processor.batch_decode(gen)
+            for k, audio_obj in enumerate(decoded):
+                arr = audio_obj.get("audio") if isinstance(audio_obj, dict) else audio_obj
+                if arr is None:
+                    continue
+                out[pos + k] = np.asarray(arr, dtype=np.float32).reshape(-1)
+            pos = end
+        except torch.cuda.OutOfMemoryError:
+            torch.cuda.empty_cache()
+            if sub <= MIN_OOM_BATCH:
+                # Give up on this chunk; entries stay None and the caller retries.
+                pos = end
+            else:
+                sub = max(sub // 2, MIN_OOM_BATCH)
+    return out
+
+
 def synthesize_voice_queue(
-    loaded: LoadedTada,
-    voice_cache: dict[str, object],
+    loaded: LoadedHiggs,
+    voice_cache: dict[str, _VoiceRef],
     voice_queue: dict[str, list[_QueueItem]],
     staging: Staging,
     *,
-    max_batch: int = 256,
+    opts: HiggsInferenceOptions,
+    max_batch: int = 32,
     on_voice_done: Callable[[str, int], None] | None = None,
     on_turn_ok: Callable[[int], None] | None = None,
     log_failure: Callable[[str, str], None] | None = None,
 ) -> SynthStats:
     stats = SynthStats()
-    opts = make_locked_inference_options()
     already_done = staging.voices_done()
-    tokenizer = loaded.tokenizer
 
     for voice_id, items in voice_queue.items():
         if voice_id in already_done:
@@ -143,64 +187,52 @@ def synthesize_voice_queue(
         if voice_id not in voice_cache:
             continue
 
+        voice_ref = voice_cache[voice_id]
         rows_buffer: list[tuple] = []
-        pending: list[_QueueItem] = list(items)
+        # Length-bucket within this voice's queue: similar-length batches mean
+        # less padding waste in model.generate().
+        pending: list[_QueueItem] = sorted(items, key=lambda it: len(it.text_normalized))
 
-        with torch.inference_mode():
-            for attempt in range(MAX_SYNTH_ATTEMPTS):
-                if not pending:
-                    break
-                next_pending: list[_QueueItem] = []
-                for chunk_start in range(0, len(pending), max_batch):
-                    chunk = pending[chunk_start : chunk_start + max_batch]
-                    texts = [it.text_normalized for it in chunk]
-                    audios, times = _generate_oom_safe(
-                        loaded, voice_cache[voice_id], texts, opts,
-                    )
-                    for it, audio, time_before in zip(chunk, audios, times):
-                        if audio is None:
-                            it.last_reason = "no audio returned"
-                            next_pending.append(it)
-                            continue
-                        expected = len(tokenizer.encode(
-                            it.text_normalized, add_special_tokens=False,
-                        ))
-                        if len(time_before) < expected:
-                            it.last_reason = (
-                                f"token count {len(time_before)} < {expected}"
-                            )
-                            next_pending.append(it)
-                            continue
-                        arr = audio.detach().cpu().float().numpy().squeeze()
-                        duration_s = arr.shape[-1] / SAMPLE_RATE
-                        n_words = len(it.text_normalized.split())
-                        wpm = n_words * 60.0 / duration_s if duration_s > 0 else float("inf")
-                        if wpm > MAX_WPM:
-                            it.last_reason = f"wpm {wpm:.0f} > {MAX_WPM:.0f}"
-                            next_pending.append(it)
-                            continue
-                        spans = extract_token_spans(
-                            it.text_normalized,
-                            time_before.detach().cpu().tolist(),
-                            tokenizer,
-                            duration_s,
-                        )
-                        rows_buffer.append((
-                            it.scenario_id, it.turn_idx, voice_id,
-                            it.text_normalized,
-                            encode_audio(arr),
-                            encode_tokens(spans),
-                        ))
-                        stats.turns_ok += 1
-                        stats.record_attempt(attempt)
-                        if on_turn_ok is not None:
-                            on_turn_ok(stats.turns_ok)
-                    if len(rows_buffer) >= 1024:
-                        staging.insert_turns(rows_buffer)
-                        rows_buffer.clear()
-                pending = next_pending
-            if loaded.device == "cuda":
-                torch.cuda.empty_cache()
+        for attempt in range(MAX_SYNTH_ATTEMPTS):
+            if not pending:
+                break
+            next_pending: list[_QueueItem] = []
+            for chunk_start in range(0, len(pending), max_batch):
+                chunk = pending[chunk_start : chunk_start + max_batch]
+                texts = [it.text_normalized for it in chunk]
+                audios = _generate_oom_safe(loaded, voice_ref, texts, opts)
+                for it, audio in zip(chunk, audios):
+                    if audio is None or audio.size == 0:
+                        it.last_reason = "no audio returned"
+                        next_pending.append(it)
+                        continue
+                    duration_s = audio.shape[-1] / loaded.sampling_rate
+                    if duration_s < MIN_DUR_S:
+                        it.last_reason = f"duration {duration_s:.2f}s < {MIN_DUR_S}s"
+                        next_pending.append(it)
+                        continue
+                    n_words = len(it.text_normalized.split())
+                    wpm = n_words * 60.0 / duration_s if duration_s > 0 else float("inf")
+                    if wpm > MAX_WPM:
+                        it.last_reason = f"wpm {wpm:.0f} > {MAX_WPM:.0f}"
+                        next_pending.append(it)
+                        continue
+                    rows_buffer.append((
+                        it.scenario_id, it.turn_idx, voice_id,
+                        it.text_normalized,
+                        encode_audio(audio),
+                        None,  # tokens_json — Higgs does not expose per-token timing
+                    ))
+                    stats.turns_ok += 1
+                    stats.record_attempt(attempt)
+                    if on_turn_ok is not None:
+                        on_turn_ok(stats.turns_ok)
+                if len(rows_buffer) >= 1024:
+                    staging.insert_turns(rows_buffer)
+                    rows_buffer.clear()
+            pending = next_pending
+        if loaded.device.startswith("cuda"):
+            torch.cuda.empty_cache()
 
         for it in pending:
             stats.turns_failed += 1
@@ -259,7 +291,7 @@ def assemble_shards(
                 text_normalized=st.text_normalized,
                 voice_id=st.voice_id,
                 audio=AudioBytes(bytes=st.audio_bytes),
-                tokens=decode_tokens(st.tokens_json),
+                tokens=None,
                 model=tr["model"],
                 prompt_version=tr["prompt_version"],
                 taxonomy_version=tr["taxonomy_version"],
@@ -283,24 +315,6 @@ def append_failure(out_dir: Path, scenario_id: str, reason: str) -> None:
 
 def _now_iso() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-
-
-def encode_voice_pool(
-    loaded: LoadedTada,
-    voices_ds,
-    voice_ids_needed: Iterable[str],
-) -> dict[str, object]:
-    voice_index = {vid: i for i, vid in enumerate(voices_ds["voice_id"])}
-    cache: dict[str, object] = {}
-    for vid in dict.fromkeys(voice_ids_needed):
-        row = voices_ds[voice_index[vid]]
-        arr, sr = _decode_audio_field(row["audio"])
-        cache[vid] = loaded.encode_voice(
-            torch.tensor(arr, dtype=torch.float32), sample_rate=sr,
-        )
-    if loaded.device == "cuda":
-        torch.cuda.empty_cache()
-    return cache
 
 
 def _decode_audio_field(audio_field: Any) -> tuple[np.ndarray, int]:

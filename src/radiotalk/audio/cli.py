@@ -15,7 +15,7 @@ from rich.progress import (
 )
 
 from .._progress import ProgressLogger
-from .model import LoadedTada, TADA_ENCODER_ID, TADA_MODEL_ID, make_locked_inference_options
+from .model import HIGGS_MODEL_ID, HiggsInferenceOptions, LoadedHiggs
 from .staging import Staging
 from .synth import (
     append_failure,
@@ -30,7 +30,8 @@ from .writer import AudioShardWriter
 
 audio_app = typer.Typer(
     add_completion=False,
-    help="Synthesize the radiotalk-us-audio-100k dataset from transcripts + voices.",
+    help="Synthesize the radiotalk audio dataset from transcripts + voices "
+         "via Higgs Audio v2 voice cloning.",
 )
 console = Console()
 
@@ -45,25 +46,22 @@ def build(
     out: Annotated[Path, typer.Option(help="Output directory for parquet shards.")],
     transcripts_repo: Annotated[
         str, typer.Option(help="HF transcripts dataset repo id."),
-    ] = "twangodev/radiotalk-us-transcripts-100k",
+    ] = "twangodev/radiotalk-us-transcripts-25k",
     voices_repo: Annotated[
         str, typer.Option(help="HF voices dataset repo id."),
     ] = "twangodev/radiotalk-voices-2k",
     model_id: Annotated[
-        str, typer.Option(help="TADA causal LM model id."),
-    ] = TADA_MODEL_ID,
-    encoder_id: Annotated[
-        str, typer.Option(help="TADA encoder/codec model id."),
-    ] = TADA_ENCODER_ID,
+        str, typer.Option(help="HuggingFace Higgs Audio v2 model id."),
+    ] = HIGGS_MODEL_ID,
     limit: Annotated[
         int | None, typer.Option(help="Cap on transcripts to process (debug)."),
     ] = None,
     max_batch: Annotated[
         int, typer.Option(help="Max texts per model.generate() call (per voice)."),
-    ] = 256,
-    compile_model: Annotated[
-        bool, typer.Option("--compile/--no-compile", help="Apply torch.compile to TADA."),
-    ] = True,
+    ] = 32,
+    max_new_tokens: Annotated[
+        int, typer.Option(help="Per-turn audio token cap."),
+    ] = 600,
     shard_size: Annotated[
         int, typer.Option(help="Turns per parquet shard."),
     ] = 5000,
@@ -81,6 +79,7 @@ def build(
 
     out.mkdir(parents=True, exist_ok=True)
     staging_path = out / ".staging" / "audio.sqlite"
+    ref_dir = out / ".staging" / "voice_refs"
 
     console.print(f"[cyan]loading transcripts[/]: {transcripts_repo}")
     transcripts_ds = load_dataset(transcripts_repo, split="train")
@@ -94,13 +93,15 @@ def build(
     voice_ids = list(voices_ds["voice_id"])
     console.print(f"  {len(voice_ids)} voices")
 
-    console.print(f"[cyan]loading TADA[/]:        {model_id}")
-    loaded = LoadedTada.load(model_id=model_id, encoder_id=encoder_id)
-    if compile_model:
-        console.print("compiling TADA (first batch will pay compile cost)...")
-        loaded.compile()
+    console.print(f"[cyan]loading Higgs[/]:       {model_id}")
+    loaded = LoadedHiggs.load(model_id=model_id)
+    console.print(
+        f"  loaded "
+        f"({sum(p.numel() for p in loaded.model.parameters())/1e9:.1f}B params, "
+        f"device={loaded.device})"
+    )
 
-    opts = make_locked_inference_options()
+    opts = HiggsInferenceOptions(max_new_tokens=max_new_tokens)
     fp = synth_config_fingerprint(loaded.model_id, opts)
     console.print(f"synth fingerprint: [bold]{fp}[/]")
 
@@ -109,7 +110,7 @@ def build(
         "voices_repo": voices_repo,
         "transcripts_repo": transcripts_repo,
         "max_batch": max_batch,
-        "compile": compile_model,
+        "max_new_tokens": max_new_tokens,
     }
     writer = AudioShardWriter.open(
         out_dir=out, shard_size=shard_size, config_fingerprint=fp,
@@ -118,6 +119,7 @@ def build(
     staging = Staging(staging_path)
 
     log_path = log_file if log_file is not None else out / "run.log"
+    logger = ProgressLogger(log_path, total=0, log_every=log_every)
 
     try:
         console.print("[bold]phase 1[/]: assigning voices and queueing turns")
@@ -134,8 +136,8 @@ def build(
             len(items) for vid, items in voice_queue.items() if vid not in already_done
         )
 
-        console.print(f"  encoding {unique_voices:,} reference voices once...")
-        voice_cache = encode_voice_pool(loaded, voices_ds, voice_queue.keys())
+        console.print(f"  materializing {unique_voices:,} reference voices once...")
+        voice_cache = encode_voice_pool(loaded, voices_ds, voice_queue.keys(), ref_dir)
 
         logger = ProgressLogger(log_path, total=remaining_turns, log_every=log_every)
         console.print(
@@ -160,6 +162,7 @@ def build(
 
             stats = synthesize_voice_queue(
                 loaded, voice_cache, voice_queue, staging,
+                opts=opts,
                 max_batch=max_batch,
                 on_turn_ok=_on_turn_ok,
                 log_failure=lambda sid, reason: append_failure(out, sid, reason),

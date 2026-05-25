@@ -1,73 +1,81 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import torch
-import torch._inductor.config
 
 
-torch._inductor.config.triton.cudagraph_skip_dynamic_graphs = True
-torch.set_float32_matmul_precision("high")
+HIGGS_MODEL_ID = "eustlb/higgs-audio-v2-generation-3B-base"
 
 
-TADA_MODEL_ID = "HumeAI/tada-3b-ml"
-TADA_ENCODER_ID = "HumeAI/tada-codec"
-NUM_TRANSITION_STEPS = 5
-
-
-def make_locked_inference_options():
-    from tada.modules.tada import InferenceOptions
-    return InferenceOptions(
-        num_flow_matching_steps=20,
-        num_acoustic_candidates=4,
-        scorer="spkr_verification",
-        spkr_verification_weight=1.0,
-        acoustic_cfg_scale=1.8,
-        duration_cfg_scale=1.0,
-        noise_temperature=0.75,
-        time_schedule="logsnr",
-        speed_up_factor=1.2,
-    )
+@dataclass(frozen=True)
+class HiggsInferenceOptions:
+    max_new_tokens: int = 600
+    do_sample: bool = False
+    temperature: float = 1.0
+    top_p: float = 1.0
 
 
 @dataclass
-class LoadedTada:
-    encoder: object
+class LoadedHiggs:
+    """Wraps the upstream HiggsAudioV2 model + processor for voice-cloned TTS.
+
+    The cloning prompt shape, per the HF model card:
+        [system] Generate audio following instruction.
+        [scene]  Audio is a VHF AM aviation radio transmission with mild radio noise.
+        [user]   <voice reference transcript>
+        [asst]   <voice reference audio>
+        [user]   <target text>
+    """
     model: object
-    tokenizer: object
+    processor: object
     device: str
     model_id: str
+
+    SYSTEM_TEXT: str = "Generate audio following instruction."
+    SCENE_TEXT: str = (
+        "Audio is a VHF AM aviation radio transmission with mild radio noise."
+    )
 
     @classmethod
     def load(
         cls,
         device: str | None = None,
-        model_id: str = TADA_MODEL_ID,
-        encoder_id: str = TADA_ENCODER_ID,
+        model_id: str = HIGGS_MODEL_ID,
         dtype: torch.dtype = torch.bfloat16,
-    ) -> "LoadedTada":
-        from tada.modules.encoder import Encoder
-        from tada.modules.tada import TadaForCausalLM
+    ) -> "LoadedHiggs":
+        from transformers import AutoProcessor, HiggsAudioV2ForConditionalGeneration
 
         if device is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-        encoder = Encoder.from_pretrained(encoder_id).to(device)
-        model = TadaForCausalLM.from_pretrained(model_id, torch_dtype=dtype).to(device)
-        return cls(
-            encoder=encoder,
-            model=model,
-            tokenizer=model.tokenizer,
-            device=device,
-            model_id=model_id,
+            device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        processor = AutoProcessor.from_pretrained(model_id, device_map="auto")
+        model = HiggsAudioV2ForConditionalGeneration.from_pretrained(
+            model_id, torch_dtype=dtype, device_map=device,
         )
+        model.eval()
+        return cls(model=model, processor=processor, device=device, model_id=model_id)
 
-    def encode_voice(self, audio: torch.Tensor, sample_rate: int):
-        if audio.ndim == 1:
-            audio = audio.unsqueeze(0)
-        audio = audio.to(self.device).float()
-        audio = audio / audio.abs().max().clamp(min=1e-8)
-        with torch.inference_mode():
-            return self.encoder(audio, sample_rate=sample_rate)
+    @property
+    def sampling_rate(self) -> int:
+        # 24 kHz matches voices-2k and the v1 dataset format.
+        return 24000
 
-    def compile(self) -> None:
-        self.model.compile()
+    def build_conversation(
+        self,
+        voice_text: str,
+        voice_ref_path: str | Path,
+        text: str,
+    ) -> list[dict]:
+        return [
+            {"role": "system", "content": [
+                {"type": "text", "text": self.SYSTEM_TEXT}]},
+            {"role": "scene", "content": [
+                {"type": "text", "text": self.SCENE_TEXT}]},
+            {"role": "user", "content": [
+                {"type": "text", "text": voice_text.strip()}]},
+            {"role": "assistant", "content": [
+                {"type": "audio", "url": str(voice_ref_path)}]},
+            {"role": "user", "content": [
+                {"type": "text", "text": text}]},
+        ]
