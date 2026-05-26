@@ -13,14 +13,20 @@ _CLEAN_COLS = [
 ]
 
 
-def snapshot_clean_repo(repo_id: str) -> Path:
-    """Resolve the local cache directory for ``repo_id`` (downloads if missing,
-    no-op if already cached). Returns the snapshot path containing the
-    shard-*.parquet files.
+def snapshot_clean_repo(repo_id_or_path: str) -> Path:
+    """Resolve the local directory holding shard-*.parquet files.
+
+    Accepts either a HuggingFace dataset repo id (downloads if missing,
+    no-op if already cached) or a local directory path. Local paths let
+    us run the radio pipeline against an in-progress audio build before
+    it has been published to the Hub.
     """
+    local = Path(repo_id_or_path)
+    if local.exists() and local.is_dir():
+        return local.resolve()
     from huggingface_hub import snapshot_download
     p = snapshot_download(
-        repo_id=repo_id,
+        repo_id=repo_id_or_path,
         repo_type="dataset",
         allow_patterns=["shard-*.parquet"],
     )

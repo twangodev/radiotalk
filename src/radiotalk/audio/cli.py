@@ -63,8 +63,10 @@ def build(
         int, typer.Option(help="Per-turn audio token cap."),
     ] = 600,
     shard_size: Annotated[
-        int, typer.Option(help="Turns per parquet shard."),
-    ] = 5000,
+        int, typer.Option(help="Turns per parquet shard. ~1250 rows targets "
+                          "~250 MB shards with embedded 24 kHz PCM_16 audio "
+                          "(HF Hub viewer + parallel-download friendly)."),
+    ] = 1250,
     resume: Annotated[bool, typer.Option("--resume/--no-resume")] = True,
     log_file: Annotated[
         Path | None,

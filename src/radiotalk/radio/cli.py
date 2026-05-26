@@ -42,8 +42,9 @@ def _radio_callback() -> None:
 @radio_app.command()
 def synthesize(
     clean_repo: Annotated[
-        str, typer.Option(help="HF clean audio dataset repo id."),
-    ] = "twangodev/radiotalk-us-audio-tada-clean",
+        str, typer.Option(help="HF clean audio dataset repo id, or a local "
+                          "directory containing shard-*.parquet."),
+    ] = "twangodev/radiotalk-us-audio-higgs-clean",
     out: Annotated[
         Path, typer.Option(help="Output directory for parquet shards."),
     ] = Path("out/radio-100k"),
@@ -55,7 +56,9 @@ def synthesize(
     limit: Annotated[
         int | None, typer.Option(help="Cap on clean rows to process (debug)."),
     ] = None,
-    shard_size: Annotated[int, typer.Option(help="Rows per output parquet shard.")] = 5000,
+    shard_size: Annotated[int, typer.Option(help="Rows per output parquet shard. "
+                          "~1250 targets ~250 MB shards (HF Hub viewer + "
+                          "parallel-download friendly).")] = 1250,
     resume: Annotated[bool, typer.Option("--resume/--no-resume")] = True,
     log_file: Annotated[
         Path | None,
